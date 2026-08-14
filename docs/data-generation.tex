@@ -298,14 +298,27 @@ $\sigma$ 是观测噪声标准差，默认 $0.3$。
 \texttt{dag\_edge\_p} 是遗留字段：仍接受、仍写入 \texttt{response\_law}，
 但不再按 Bernoulli$(p)$ 连边。独立列不出现在这张 DAG 里。
 
-\paragraph{Token SCM。}
+\paragraph{谁先出现：根节点。}
+拓扑序 $\pi$ 是非独立列的随机置换。$\pi$ 上第一个节点的前驱是空集，所以\textbf{一定是根}。
+其后节点的入度 $k\sim\mathrm{Poisson}(2.2)$，抽到 $0$ 也会成为根（Poisson$(2.2)$ 下大约 $11\%$）。
+星形叠加可能给后面的点补上 hub 父节点，但补不了 $\pi$ 里那些还没有前驱的点。
+独立列不进这张图，没有 token，不算根。
+
+根没有东西可继承。对该列噪声族在 $\mathbb{R}^k$ 上抽一条向量，拧到单位球上就结束：
+\begin{equation}
+  \eta_j \sim \mathrm{NoiseFam}_j,\qquad
+  \mathbf{t}_j \;=\; \mathrm{normalize}(\eta_j),\qquad
+  \varphi_j=\mathrm{identity}.
+\end{equation}
+高斯根是球面上的均匀方向；$t$ / Cauchy 根更爱贴轴、出尖方向。
+这就是因果图里「最开始那一批」。
+
+\paragraph{Token SCM：有父之后。}
 $\beta$ 是父节点混合权重（L1 归一，$\sum|\beta|=1$）；效应强度是遗传力 $\alpha$（默认 $0.75$）。
 相对 $|\beta|$ 先按 NOTEARS/LiNGAM 惯例从 $\mathrm{Unif}[\beta_{\min},\beta_{\max}]$（默认 $[0.5,2]$）抽取、符号独立取 $\pm 1$，再 L1 归一；单父时 $\beta=\pm 1$。
 $\mathrm{Unif}[0.5,2]$ 只决定多父时的相对比例，normalize 之前。
 不要再用 $\mathcal{N}(0,0.4^2)$。
-按拓扑序在单位球上生成 $\mathbf{t}_j$。根节点（无父）
-$\mathbf{t}_j=\mathrm{normalize}(\eta_j)$，$\varphi_j=\mathrm{identity}$。
-有父时先线性混合再过非线性
+有父时按拓扑序先线性混合再过非线性
 \begin{equation}
   \mathbf{s}^{\mathrm{raw}}_j \;=\; \sum_{p\in\mathrm{pa}(j)}\beta_{jp}\,\mathbf{t}_p,\qquad
   \mathbf{s}_j \;=\; \mathrm{normalize}\bigl(\varphi_j(\mathbf{s}^{\mathrm{raw}}_j)\bigr),
