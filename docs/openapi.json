@@ -1,0 +1,468 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TabUF Episode API",
+    "description": "\n观测第零版 episode 数据服务。\n\n生成律：`Y[i,j] = <U[i], W[j]> + E[i,j]`。先抽总体再填格子，再切 C/Q。\n训练默认 **不返回** 潜变量 `U` / `W`。语义以仓库 `docs/data-generation.pdf` 为准；\n本服务的字段名是那份文档的临时投影，会跟着文档改。\n",
+    "contact": {
+      "name": "tabuf-episode-api",
+      "url": "https://github.com/1587causalai/tabuf-episode-api"
+    },
+    "license": {
+      "name": "MIT"
+    },
+    "version": "v0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "存活检查",
+        "description": "进程活着且生成器可导入时返回 ok。不含鉴权。",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v0/episodes": {
+      "post": {
+        "tags": [
+          "episodes"
+        ],
+        "summary": "抽取观测 episode",
+        "description": "按 DiscoSCM 第零版因子律生成 Unit×Feature episode。\n\n调用方拿到的是挖空后的表和查询真值，不是 DAG，也不是 u_i。",
+        "operationId": "create_episodes_v0_episodes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EpisodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpisodeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Episode": {
+        "properties": {
+          "context_mask": {
+            "items": {
+              "items": {
+                "type": "boolean"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Context Mask",
+            "description": "M^C，true 表示该格属于上下文 C"
+          },
+          "query_mask": {
+            "items": {
+              "items": {
+                "type": "boolean"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Query Mask",
+            "description": "M^Q，true 表示该格属于查询 Q"
+          },
+          "y_input": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Y Input",
+            "description": "输入表。C 位置是观测值，Q 位置是 null"
+          },
+          "y_query": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Y Query",
+            "description": "Q 上的真值，按行优先拉直，长度 = n_query"
+          },
+          "shapes": {
+            "$ref": "#/components/schemas/Shapes"
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed"
+          },
+          "U": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "U",
+            "description": "仅 debug=true"
+          },
+          "W": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "W",
+            "description": "仅 debug=true"
+          },
+          "Y_full": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y Full",
+            "description": "仅 debug=true"
+          }
+        },
+        "type": "object",
+        "required": [
+          "context_mask",
+          "query_mask",
+          "y_input",
+          "y_query",
+          "shapes",
+          "seed"
+        ],
+        "title": "Episode"
+      },
+      "EpisodeRequest": {
+        "properties": {
+          "n_units": {
+            "type": "integer",
+            "maximum": 512.0,
+            "minimum": 8.0,
+            "title": "N Units",
+            "description": "这一集实现多少 unit（行）。不是 row-id 个数，是总体切片大小。",
+            "default": 64,
+            "examples": [
+              16
+            ]
+          },
+          "n_features": {
+            "type": "integer",
+            "maximum": 64.0,
+            "minimum": 2.0,
+            "title": "N Features",
+            "description": "feature（列）个数。",
+            "default": 8,
+            "examples": [
+              4
+            ]
+          },
+          "unit_dim": {
+            "type": "integer",
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Unit Dim",
+            "description": "个体潜空间维 k。U 形状 (n_units, unit_dim)。",
+            "default": 4,
+            "examples": [
+              4
+            ]
+          },
+          "query_frac": {
+            "type": "number",
+            "exclusiveMaximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Query Frac",
+            "description": "查询格子 Q 占总格子的比例。其余为上下文 C。C ∩ Q = ∅。",
+            "default": 0.15,
+            "examples": [
+              0.15
+            ]
+          },
+          "sigma": {
+            "type": "number",
+            "maximum": 10.0,
+            "minimum": 0.0,
+            "title": "Sigma",
+            "description": "观测噪声标准差。第零版只抽一次 factual noise。",
+            "default": 0.3,
+            "examples": [
+              0.3
+            ]
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "基种子。第 e 集使用 seed+e。null 则随机抽一个基种子，仍写入每集 seed。",
+            "default": 0,
+            "examples": [
+              0
+            ]
+          },
+          "n_episodes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "N Episodes",
+            "description": "一次返回多少集。服务端硬顶 32。",
+            "default": 1,
+            "examples": [
+              1
+            ]
+          },
+          "debug": {
+            "type": "boolean",
+            "title": "Debug",
+            "description": "true 时附带 U、W、Y_full。训练路径必须 false。",
+            "default": false,
+            "examples": [
+              false
+            ]
+          }
+        },
+        "type": "object",
+        "title": "EpisodeRequest",
+        "examples": [
+          {
+            "debug": false,
+            "n_episodes": 1,
+            "n_features": 4,
+            "n_units": 16,
+            "query_frac": 0.15,
+            "seed": 0,
+            "sigma": 0.3,
+            "unit_dim": 4
+          }
+        ]
+      },
+      "EpisodeResponse": {
+        "properties": {
+          "episodes": {
+            "items": {
+              "$ref": "#/components/schemas/Episode"
+            },
+            "type": "array",
+            "title": "Episodes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "episodes"
+        ],
+        "title": "EpisodeResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "version"
+        ],
+        "title": "HealthResponse"
+      },
+      "Shapes": {
+        "properties": {
+          "n_units": {
+            "type": "integer",
+            "title": "N Units"
+          },
+          "n_features": {
+            "type": "integer",
+            "title": "N Features"
+          },
+          "unit_dim": {
+            "type": "integer",
+            "title": "Unit Dim"
+          },
+          "n_query": {
+            "type": "integer",
+            "title": "N Query"
+          },
+          "n_context": {
+            "type": "integer",
+            "title": "N Context"
+          },
+          "y_input": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Y Input"
+          },
+          "context_mask": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Context Mask"
+          },
+          "query_mask": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Query Mask"
+          },
+          "y_query": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Y Query"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n_units",
+          "n_features",
+          "unit_dim",
+          "n_query",
+          "n_context",
+          "y_input",
+          "context_mask",
+          "query_mask",
+          "y_query"
+        ],
+        "title": "Shapes"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

@@ -1,0 +1,292 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.6cm]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{setspace}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable}
+\usepackage{fancyhdr}
+\usepackage{listings}
+\usepackage{microtype}
+
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!60!black}
+\definecolor{lockfr}{HTML}{2E7D32}
+\definecolor{lockbg}{HTML}{E8F5E9}
+\definecolor{warnfr}{HTML}{C62828}
+\definecolor{warnbg}{HTML}{FFEBEE}
+\definecolor{notefr}{HTML}{1565C0}
+\definecolor{notebg}{HTML}{E3F2FD}
+\newtcolorbox{notebox}{colback=notebg,colframe=notefr,title={说明},fonttitle=\bfseries,breakable,sharp corners=southwest}
+\newtcolorbox{warnbox}{colback=warnbg,colframe=warnfr,title={训练合同},fonttitle=\bfseries,breakable,sharp corners=southwest}
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  columns=fullflexible,
+  keepspaces=true,
+  backgroundcolor=\color{gray!6}
+}
+
+\setlength{\headheight}{14pt}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{TabUF Episode API 接口文档}
+\rhead{v0 \quad 2026-08-14}
+\cfoot{\thepage}
+\setstretch{1.15}
+
+\title{TabUF Episode API 接口文档\\[0.3em]\large 第零版观测数据服务}
+\author{仓库 \texttt{1587causalai/tabuf-episode-api}}
+\date{2026 年 8 月 14 日}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section{这份文档管什么}
+
+生成语义（总体、unit-specific 响应律、C/Q 出题）写在
+\texttt{docs/data-generation.pdf}。
+\textbf{这份文档只写运输层}：地址、方法、字段、状态码、例子。
+字段名可以改，改的时候先改生成文档，再改这里，再改代码。
+
+交互式文档由 FastAPI 自动生成，和本文同步：
+
+\begin{itemize}
+  \item Swagger UI：\texttt{/docs}
+  \item ReDoc：\texttt{/redoc}
+  \item OpenAPI JSON：\texttt{/openapi.json}
+\end{itemize}
+
+\section{服务地址}
+
+当前部署在文献调研这台机器上，本机回环 + 一条临时公网隧道。
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+角色 & URL \\
+\midrule
+本机 & \url{http://127.0.0.1:8787} \\
+公网隧道（会变） & \url{https://spotlight-predicted-heaven-clips.trycloudflare.com} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{notebox}
+隧道是 Cloudflare Quick Tunnel，没有 SLA，URL 在进程重启后会换。
+稳定入口始终是本机 \texttt{127.0.0.1:8787}。
+无鉴权、无 HTTPS 终止以外的证书、无速率配额（单次最多 32 episode，格子上限见下表）。
+\end{notebox}
+
+\section{约定}
+
+\begin{itemize}
+  \item 协议：HTTP/1.1，JSON，UTF-8。
+  \item \texttt{Content-Type: application/json}。
+  \item 无认证头。
+  \item 时间：无时钟字段。可复现性靠 \texttt{seed}。
+  \item 浮点：IEEE-754 JSON number。查询格在 \texttt{y\_input} 里是 JSON \texttt{null}，不是字符串 \texttt{"NaN"}。
+  \item 掩码：JSON boolean。
+  \item 拉直顺序：行优先（C-order）。\texttt{y\_query[t]} 对应 \texttt{query\_mask} 拉直后第 $t$ 个 \texttt{true}。
+\end{itemize}
+
+\section{端点一览}
+
+\begin{center}
+\begin{tabular}{@{}llll@{}}
+\toprule
+方法 & 路径 & 作用 & 鉴权 \\
+\midrule
+\texttt{GET}  & \texttt{/health} & 存活 & 无 \\
+\texttt{GET}  & \texttt{/docs} & Swagger UI & 无 \\
+\texttt{GET}  & \texttt{/redoc} & ReDoc & 无 \\
+\texttt{GET}  & \texttt{/openapi.json} & 机器可读 schema & 无 \\
+\texttt{POST} & \texttt{/v0/episodes} & 抽取观测 episode & 无 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+URL 里的 \texttt{/v0} 是生成语义版本，不是 HTTP 框架版本。
+换响应律或换张量合同，才升 \texttt{/v1}。
+
+\section{\texttt{GET /health}}
+
+探活。生成器能 import、进程在听端口，就返回 200。
+
+\paragraph{响应 200}
+\begin{lstlisting}
+{"ok": true, "version": "v0"}
+\end{lstlisting}
+
+\begin{center}
+\begin{tabular}{@{}llp{7.5cm}@{}}
+\toprule
+字段 & 类型 & 含义 \\
+\midrule
+\texttt{ok} & bool & 恒为 true；能返回就说明活着 \\
+\texttt{version} & string & 当前生成语义版本，现为 \texttt{v0} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{\texttt{POST /v0/episodes}}
+
+抽一批观测 episode。每集独立：先抽总体 $\{\mathbf{u}_i\}$，再填
+$Y_{ij}=\langle\mathbf{u}_i,\mathbf{w}_j\rangle+e_{ij}$，再切 $C/Q$。
+
+\subsection{请求体}
+
+全部字段可选。缺省等于下表默认值。非法值返回 422。
+
+\begin{center}
+\begin{tabular}{@{}llclp{5.6cm}@{}}
+\toprule
+字段 & 类型 & 默认 & 范围 & 含义 \\
+\midrule
+\texttt{n\_units} & int & 64 & $[8,512]$ & 本集 unit 数 $n$ \\
+\texttt{n\_features} & int & 8 & $[2,64]$ & 列数 $d$ \\
+\texttt{unit\_dim} & int & 4 & $[1,32]$ & 个体潜维 $k$ \\
+\texttt{query\_frac} & float & 0.15 & $(0,1)$ & $Q$ 占总格子比例 \\
+\texttt{sigma} & float & 0.3 & $[0,10]$ & 观测噪声标准差 \\
+\texttt{seed} & int/null & 0 & --- & 基种子；第 $e$ 集用 $\mathrm{seed}+e$ \\
+\texttt{n\_episodes} & int & 1 & $[1,32]$ & 一次返回多少集（硬顶 32） \\
+\texttt{debug} & bool & false & --- & 是否附带 $U,W,Y_{\mathrm{full}}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\texttt{seed=null} 时服务端随机抽一个基种子，仍然写入每集的 \texttt{seed} 字段，所以返回值可复现、请求不必可复现。
+
+最小请求：空对象 \texttt{\{\}}，等价于 $64\times 8$、$k=4$、$q=0.15$、1 集。
+
+\subsection{响应 200}
+
+\begin{lstlisting}
+{
+  "episodes": [
+    {
+      "context_mask": [[true, false], ...],
+      "query_mask":   [[false, true], ...],
+      "y_input":      [[0.12, null], ...],
+      "y_query":      [0.87, ...],
+      "shapes": {
+        "n_units": 16, "n_features": 4, "unit_dim": 4,
+        "n_query": 10, "n_context": 54,
+        "y_input": [16, 4],
+        "context_mask": [16, 4],
+        "query_mask": [16, 4],
+        "y_query": [10]
+      },
+      "seed": 0
+    }
+  ]
+}
+\end{lstlisting}
+
+\begin{center}
+\begin{tabular}{@{}llp{7.2cm}@{}}
+\toprule
+字段 & 形状 & 含义 \\
+\midrule
+\texttt{context\_mask} & $n\times d$ bool & $M^C$；true $\Leftrightarrow$ 该格 $\in C$ \\
+\texttt{query\_mask} & $n\times d$ bool & $M^Q$；true $\Leftrightarrow$ 该格 $\in Q$ \\
+\texttt{y\_input} & $n\times d$ float/null & $C$ 上为 $Y_{ij}$，$Q$ 上为 \texttt{null} \\
+\texttt{y\_query} & $n_Q$ float & $Q$ 上真值，行优先拉直 \\
+\texttt{shapes} & 对象 & 以上张量形状，避免客户端猜 \\
+\texttt{seed} & int & 本集实际使用的种子 \\
+\texttt{U} & $n\times k$ & 仅 \texttt{debug=true} \\
+\texttt{W} & $d\times k$ & 仅 \texttt{debug=true} \\
+\texttt{Y\_full} & $n\times d$ & 仅 \texttt{debug=true} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+不变量（第零版）：
+
+\begin{align*}
+  C\cap Q&=\emptyset,\\
+  C\cup Q&=\{1,\ldots,n\}\times\{1,\ldots,d\},\\
+  n_Q&=\mathrm{clip}(\mathrm{round}(q\cdot nd),1,nd-1).
+\end{align*}
+
+默认 payload \textbf{不含} $U,W,Y_{\mathrm{full}}$。
+\texttt{debug=true} 时才出现这三个键；\texttt{false} 时键直接省略，不是 \texttt{null}。
+
+\begin{warnbox}
+训练 DataLoader 禁止设 \texttt{debug=true}，禁止把 $U$ 喂进网络。
+$u_i$ 是个体真名。漏出去，预训练就是漏题。
+\end{warnbox}
+
+\subsection{错误}
+
+\begin{center}
+\begin{tabular}{@{}clp{8cm}@{}}
+\toprule
+状态码 & 何时 & 体 \\
+\midrule
+200 & 生成成功 & 见上 \\
+422 & 字段越界、类型不对、缺 JSON & FastAPI 校验错误列表 \\
+405 & 对 \texttt{/v0/episodes} 用了 GET 等 & --- \\
+404 & 路径不存在 & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+第零版没有业务错误码。格子太大被 \texttt{le=} 拦在 422，而不是生成到一半再 500。
+
+\section{调用例子}
+
+探活：
+\begin{lstlisting}
+curl -s http://127.0.0.1:8787/health
+\end{lstlisting}
+
+最小生成：
+\begin{lstlisting}
+curl -s -X POST http://127.0.0.1:8787/v0/episodes \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+\end{lstlisting}
+
+指定格子（推荐写进脚本的默认）：
+\begin{lstlisting}
+curl -s -X POST http://127.0.0.1:8787/v0/episodes \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "n_units": 16,
+        "n_features": 4,
+        "unit_dim": 4,
+        "query_frac": 0.15,
+        "sigma": 0.3,
+        "seed": 0,
+        "n_episodes": 2,
+        "debug": false
+      }'
+\end{lstlisting}
+
+公网隧道把主机换成当前隧道 URL 即可，路径不变。
+
+\section{和生成文档的分工}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+问题 & 去哪看 \\
+\midrule
+为什么先抽总体 & \texttt{docs/data-generation.pdf} \\
+$Y_{ij}=\langle u_i,w_j\rangle+e_{ij}$ & 同上 \\
+$C/Q$ 为什么是格子级 & 同上 \\
+这个字段叫什么、范围多少 & \textbf{本文} \\
+现在服务在哪 & 本文第 2 节 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+接口改了，先改本文表格，再改 \texttt{app.py} 的 Pydantic 约束，最后才 bump 例子。
+
+\end{document}

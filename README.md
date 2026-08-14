@@ -31,6 +31,13 @@ docker build -t tabuf-episode-api .
 docker run --rm -p 8787:8787 tabuf-episode-api
 ```
 
+## 文档
+
+- 生成语义（活文档）：[docs/data-generation.pdf](docs/data-generation.pdf)
+- 接口文档：[docs/api.pdf](docs/api.pdf)
+- OpenAPI：[docs/openapi.json](docs/openapi.json)
+- 交互式：服务起来后打开 `/docs`（Swagger）或 `/redoc`
+
 ## API
 
 `GET /health` → `{"ok": true, "version": "v0"}`
