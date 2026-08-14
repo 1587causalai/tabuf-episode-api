@@ -27,6 +27,8 @@ $$
 
 线上信封：完整 `values` + `missing_mask` + `query_mask`。默认 $P(M_{ij}=1)=0.05$，DiscoSCM 和监督表相同。`query_mode` 两种：`any_cell`（默认，全表抽 $0.15$）或 `label_cell`（只在目标列上抽 $0.15$ 行）。两张 mask 独立，允许重合。没有 `y_input` / `y_query`。
 
+`source=openml` 走 OpenML-CTR23 回归表（默认 `source_name=44970` QSAR_fish_toxicity）。行是实体行，最后一列是 $y$，默认 `label_cell`。`n_features` 为 `null` 时保留原表宽度，不垫到 20 列；表比 `n_units` 短则用全表，不重复填充。`source=recsys` 仍是 501。
+
 ## 运行
 
 ```bash

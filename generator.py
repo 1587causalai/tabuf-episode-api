@@ -882,7 +882,7 @@ def _sample_one_episode_job(job: dict[str, Any]) -> dict[str, Any]:
     elif resolved_src == "scm":
         ep = scm_anm(sigma=job["sigma"], **kw)
     elif resolved_src == "openml":
-        ep = openml_table(source_name=job.get("source_name"), **kw)
+        ep = openml_table(source_name=resolved_name, **kw)
     elif resolved_src == "recsys":
         ep = recsys_table(source_name=job.get("source_name"), **kw)
     else:
@@ -966,6 +966,7 @@ def sample_episodes(
         base = int(seed)
     from sources import (
         CANONICAL_SOURCES,
+        OPENML_CTR23_DEFAULT,
         SKLEARN_REAL_CANONICAL,
         SKLEARN_REAL_DS_TO_SOURCE,
         SKLEARN_SYNTH_CANONICAL,
@@ -998,6 +999,12 @@ def sample_episodes(
         resolved_name = SKLEARN_SYNTH_CANONICAL[src]
     elif src in SKLEARN_REAL_CANONICAL:
         resolved_name = SKLEARN_REAL_CANONICAL[src]
+    elif src == "openml":
+        # one table for the whole request, like sklearn_real
+        if source_name is None:
+            resolved_name = str(int(OPENML_CTR23_DEFAULT))
+        else:
+            resolved_name = str(source_name).strip()
 
     job_base = {
         "resolved_src": resolved_src,
@@ -1030,6 +1037,14 @@ def sample_episodes(
         if resolved_src == "discoscm":
             d_use, _ = _resolve_n_features(n_features, shape_rng)
             k_use, _ = _resolve_unit_dim(unit_dim, shape_rng)
+        elif resolved_src == "openml":
+            # native table width unless the request clips it
+            d_use = (
+                None
+                if n_features is None
+                else int(np.clip(int(n_features), N_FEATURES_MIN, N_FEATURES_MAX))
+            )
+            k_use = None
         else:
             d_use = (
                 DEFAULT_N_FEATURES_FALLBACK
@@ -1041,7 +1056,7 @@ def sample_episodes(
             jobs.append(
                 {
                     **job_base,
-                    "n_features": int(d_use),
+                    "n_features": None if d_use is None else int(d_use),
                     "unit_dim": k_use,
                     "ep_seed": base + e,
                 }

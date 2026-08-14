@@ -98,7 +98,7 @@ HTTP/1.1，JSON，UTF-8。无鉴权。可复现性靠 \texttt{seed}。
 \toprule
 字段 & 默认 & 范围 & 谁认 & 含义 \\
 \midrule
-\texttt{n\_units} & 1000 & $[8,4096]$ & 共享（行数） & 仅 discoscm 把行当 unit；其它 $=n_{\mathrm{samples}}$ \\
+\texttt{n\_units} & 1000 & $[8,100000]$ & 共享（行数） & 仅 discoscm 把行当 unit；其它 $=n_{\mathrm{samples}}$ \\
 \texttt{n\_features} & null & $[2,1000]$ & 共享 & 列数；null 则每个 batch 抽一次；其它来源回退 20 \\
 \texttt{seed} & 0 & --- & 共享 & 第 $e$ 集用 $\mathrm{seed}+e$ \\
 \texttt{n\_episodes} & 8 & $[1,32]$ & 共享 & 不同生成世界的条数；可大于 batch\_size \\
@@ -230,7 +230,7 @@ canonical & 别名 & 行含义 & query & missing & HTTP \\
 \texttt{sklearn\_wine} & real$^\dagger$ & entity\_row & label\_cell $0.15$ & $0.05$ & 200 \\
 \texttt{sklearn\_breast\_cancer} & real$^\dagger$ & entity\_row & label\_cell $0.15$ & $0.05$ & 200 \\
 \texttt{sklearn\_diabetes} & real$^\dagger$ & entity\_row & label\_cell $0.15$ & $0.05$ & 200 \\
-\texttt{openml} & --- & entity\_row & label\_cell $0.15$ & $0.05$ & 501 \\
+\texttt{openml} & --- & entity\_row & label\_cell $0.15$ & $0.05$ & 200 \\
 \texttt{recsys} & --- & user & any\_cell $0.15$ & $0.05$ & 501 \\
 \bottomrule
 \end{tabular}
@@ -266,7 +266,8 @@ source & 会出现 & 不会出现 \\
 discoscm & \texttt{population}（\texttt{mixture}+\texttt{assignment}+\texttt{representations}）+ \texttt{response\_law} & \texttt{mechanism} \\
 scm & \texttt{mechanism}：\texttt{framework=ANM-SCM}，\texttt{edges}，\texttt{node\_fn}，\texttt{target\_col} & population、response\_law \\
 sklearn\_* & \texttt{mechanism}：\texttt{maker} 或 \texttt{dataset} & population、response\_law \\
-openml / recsys & --- & 整条请求 501，无 episode \\
+openml & \texttt{mechanism}：\texttt{framework=openml-ctr23}，\texttt{data\_id}，\texttt{name}，原表尺寸 & population、response\_law \\
+recsys & --- & 整条请求 501，无 episode \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -296,6 +297,10 @@ curl -s -X POST http://127.0.0.1:8787/v0/episodes \
 curl -s -X POST http://127.0.0.1:8787/v0/episodes \
   -H 'Content-Type: application/json' \
   -d '{"source":"sklearn_iris","n_units":30,"n_features":5,"seed":0}'
+
+curl -s -X POST http://127.0.0.1:8787/v0/episodes \\
+  -H 'Content-Type: application/json' \\
+  -d '{"source":"openml","source_name":"44970","n_episodes":1,"n_units":1000,"seed":0}'
 \end{lstlisting}
 
 \section{错误码}
@@ -307,7 +312,7 @@ curl -s -X POST http://127.0.0.1:8787/v0/episodes \
 \midrule
 200 & 成功。body 为上一节的 JSON。 \\
 422 & 字段越界（\texttt{n\_units}/\texttt{n\_features}/\texttt{unit\_dim}/\texttt{sigma} 等 \texttt{le=}/\texttt{ge=}）；未知 \texttt{source}（detail 列出 canonical 名）；非法 \texttt{source\_name}；\texttt{type\_weights} 之和 $\le 0$。 \\
-501 & \texttt{openml} 或 \texttt{recsys}：已占位，缓存未接。 \\
+501 & \texttt{recsys}：已占位，缓存未接。 \\
 404 & 路径不存在。 \\
 405 & 方法不对（例如 \texttt{GET /v0/episodes}）。 \\
 \bottomrule

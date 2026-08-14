@@ -32,6 +32,15 @@ SKLEARN_REAL_DS_TO_SOURCE = {v: k for k, v in SKLEARN_REAL_CANONICAL.items()}
 
 SKLEARN_REAL = ("iris", "wine", "breast_cancer", "diabetes")
 
+# OpenML-CTR23 regression suite (study 353). 35 tables; default pick is 44970.
+OPENML_CTR23 = (
+    44956, 44957, 44958, 44959, 44963, 44964, 44965, 44966, 44969,
+    44971, 44972, 44973, 44974, 44975, 44976, 44977, 44978, 44979,
+    44980, 44981, 44983, 44984, 44987, 44989, 44990, 44992, 44993,
+    45012, 41021, 44960, 44962, 44967, 44970, 44994, 45402,
+)
+OPENML_CTR23_DEFAULT = 44970  # QSAR_fish_toxicity
+
 CANONICAL_SOURCES = (
     "discoscm",
     "scm",
@@ -216,15 +225,17 @@ SOURCE_PROFILES: dict[str, dict[str, Any]] = {
         "alias_of": list(SKLEARN_REAL_CANONICAL.keys()),
     },
     "openml": {
-        "status": "placeholder",
+        "status": "ready",
         "family": "openml",
         "row_meaning": "entity_row",
         "query_mode": "label_cell",
         "query_frac": DEFAULT_QUERY_FRAC,
         "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
-        **_rf(_PLACEHOLDER_USED, _PLACEHOLDER_IGNORED),
-        "note": "OpenML classification/regression tables; last column is the label; missing 0.05; returns 501 until cached.",
+        **_rf(_SHARED + _SOURCE_NAME, _DISCOSCM_ONLY + _SIGMA + _DEBUG),
+        "note": "OpenML-CTR23 as the same episode contract as sklearn/scm: values + missing + query. source_name is a data_id; omit → 44970. n_features=null keeps native width (no 20-col pad). n_units caps rows, no repeat. label_cell / missing 0.05 / query 0.15 same as other supervised sources.",
+        "suite": "CTR23",
+        "data_ids": list(OPENML_CTR23),
     },
     "recsys": {
         "status": "placeholder",
@@ -539,9 +550,123 @@ def scm_anm(
     )
 
 
-def openml_table(*_a, **_k) -> dict[str, Any]:
-    raise NotImplementedError(
-        "openml source is specified but not wired. Pass a cached dataset name next; default stays discoscm."
+def openml_table(
+    rng: np.random.Generator,
+    *,
+    n_units: int,
+    n_features: int | None,
+    missing_frac: float,
+    query_frac: float,
+    seed: int | None,
+    return_mechanism: bool,
+    source_name: str | None = None,
+    query_mode: str = "label_cell",
+    source: str | None = None,
+) -> dict[str, Any]:
+    """One OpenML-CTR23 regression table compiled into an episode.
+
+    Last column is y. Rows are entity rows, not units. If the table is
+    smaller than n_units we keep every row (no padding). Features are
+    kept native unless n_features is set smaller than the table width.
+    """
+    import pandas as pd
+    from sklearn.datasets import fetch_openml
+
+    raw = source_name if source_name is not None else str(OPENML_CTR23_DEFAULT)
+    try:
+        data_id = int(str(raw).strip())
+    except ValueError as exc:
+        raise ValueError(
+            "openml source_name must be an OpenML data_id (e.g. 44970). got %r" % raw
+        ) from exc
+    bunch = fetch_openml(data_id=data_id, as_frame=True, parser="auto")
+    from pandas.api.types import (
+        is_bool_dtype,
+        is_numeric_dtype,
+        is_object_dtype,
+        is_string_dtype,
+    )
+
+    X = bunch.data
+    if X is None:
+        X = pd.DataFrame()
+    else:
+        X = pd.DataFrame(X).copy()
+    y = bunch.target
+    if y is None:
+        raise ValueError("OpenML data_id %s has no target column" % data_id)
+    if isinstance(y, pd.DataFrame):
+        if y.shape[1] == 0:
+            raise ValueError("OpenML data_id %s has an empty target frame" % data_id)
+        y = y.iloc[:, 0]
+    y = pd.Series(y)
+
+    def _encode_non_numeric(s: pd.Series) -> pd.Series:
+        codes = s.astype("category").cat.codes
+        out = codes.astype("float64")
+        out = out.where(out >= 0.0, np.nan)
+        return out
+
+    encoded = {}
+    for col in X.columns:
+        s = X[col]
+        non_num = (
+            is_bool_dtype(s)
+            or isinstance(s.dtype, pd.CategoricalDtype)
+            or is_object_dtype(s)
+            or is_string_dtype(s)
+            or not is_numeric_dtype(s)
+        )
+        if non_num:
+            encoded[col] = _encode_non_numeric(s)
+        else:
+            encoded[col] = pd.to_numeric(s, errors="coerce")
+    X = pd.DataFrame(encoded, index=X.index) if encoded else pd.DataFrame(index=X.index)
+    if not X.empty:
+        X = X.fillna(X.median(numeric_only=True)).fillna(0.0)
+    y = pd.to_numeric(y, errors="coerce")
+    y_med = float(y.median()) if y.notna().any() else 0.0
+    y = y.fillna(y_med)
+    y_arr = np.asarray(y, dtype=np.float64).reshape(-1)
+    if X.shape[1] == 0:
+        Y0 = y_arr.reshape(-1, 1)
+    else:
+        x_arr = np.asarray(X, dtype=np.float64)
+        n_align = min(x_arr.shape[0], y_arr.shape[0])
+        if n_align == 0:
+            raise ValueError("OpenML data_id %s returned an empty table" % data_id)
+        Y0 = np.column_stack([x_arr[:n_align], y_arr[:n_align].reshape(-1, 1)])
+    if Y0.size == 0 or Y0.shape[0] == 0:
+        raise ValueError("OpenML data_id %s returned an empty table" % data_id)
+    n_rows, n_cols = int(Y0.shape[0]), int(Y0.shape[1])
+    n_use = min(max(int(n_units), 1), n_rows)
+    rows = rng.choice(n_rows, size=n_use, replace=False)
+    Y = Y0[rows]
+    if n_features is not None:
+        d = max(2, int(n_features))
+        if d < n_cols:
+            feat = rng.choice(n_cols - 1, size=d - 1, replace=False)
+            Y = np.column_stack([Y[:, feat], Y[:, -1]])
+    d = int(Y.shape[1])
+    types = ["numeric"] * d
+    n_classes: list[int | None] = [None] * d
+    details = getattr(bunch, "details", None) or {}
+    name = details.get("name") if isinstance(details, dict) else None
+    mech = {
+        "framework": "openml-ctr23",
+        "data_id": int(data_id),
+        "name": str(name) if name else str(data_id),
+        "n_rows_original": n_rows,
+        "n_cols_original": n_cols,
+        "target": "last_column",
+        "task": "regression",
+        "in_ctr23": data_id in OPENML_CTR23,
+    }
+    return pack_grid(
+        Y, rng, missing_frac=missing_frac, query_frac=query_frac,
+        column_types=types, n_classes=n_classes, seed=seed,
+        return_mechanism=return_mechanism, mechanism=mech,
+        query_mode=query_mode, source=source or "openml",
     )
 
 

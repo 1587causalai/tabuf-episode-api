@@ -432,7 +432,7 @@ $\varphi$ 只作用在 token SEM 的 $\mathbf{s}^{\mathrm{raw}}$ 上，不作用
 
 格子级。默认 $P(M)=0.05$、$P(Q)=0.15$，独立抽取，并集不必是 $20\%$。
 \texttt{query\_mode=any\_cell}。\texttt{uses\_unit\_token=true}。
-\texttt{n\_units} 默认 $1000$（API 上限 $4096$）。
+\texttt{n\_units} 默认 $1000$（API 上限 $100000$）。
 \texttt{n\_features} 默认 \texttt{null}（从先验抽样，众数约 $20$，支持 $[2,1000]$）。
 \texttt{unit\_dim} 默认 \texttt{null}（从先验抽样，众数约 $16$，支持 $[2,1024]$）。
 
@@ -537,11 +537,16 @@ Friedman \#1。最后一列连续 $y$。默认 \texttt{label\_cell}，missing $0
 \texttt{sklearn\_diabetes}：最后一列连续靶。
 别名套用被抽中的真实表。
 
-\section{OpenML 占位}
+\section{OpenML-CTR23 回归表}
 \label{app:openml}
 
-监督表。行是 \texttt{entity\_row}。默认 \texttt{label\_cell}，missing $0.05$。
-缓存接上之前这条通道还不能出表。不要用 DiscoSCM 的词描述它。
+监督回归表，套件是 OpenML study 353（CTR23，35 张）。
+行是 \texttt{entity\_row}，不是 unit。最后一列是连续靶 $y$。
+默认 \texttt{label\_cell}（抽目标列 $0.15$ 行），missing $0.05$。
+\texttt{source\_name} 是 OpenML \texttt{data\_id}；省略则用 $44970$（QSAR\_fish\_toxicity）。
+\texttt{n\_features=null} 时保留原表宽度，不垫列；行数取 $\min(n_{\mathrm{units}},n_{\mathrm{rows}})$，短表不重复填充。
+\texttt{return\_mechanism} 时 \texttt{mechanism} 带 \texttt{data\_id} / \texttt{name} / 原表尺寸。
+不要用 DiscoSCM 的词描述它。
 
 \section{推荐占位}
 \label{app:recsys}
@@ -600,6 +605,9 @@ scm 给 \texttt{mechanism}：\texttt{framework=ANM-SCM}、\texttt{edges}、
 \texttt{node\_fn}、\texttt{target\_col}。没有 population / response\_law。
 
 sklearn 给 \texttt{mechanism}：\texttt{framework} 加 \texttt{maker} 或 \texttt{dataset}。
+没有 population / response\_law。
+
+openml 给 \texttt{mechanism}：\texttt{framework=openml-ctr23}、\texttt{data\_id}、\texttt{name}、原表尺寸。
 没有 population / response\_law。
 
 训练 DataLoader 不准吃这些块。

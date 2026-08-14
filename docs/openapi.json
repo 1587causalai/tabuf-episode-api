@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "TabUF Episode API",
-    "description": "\n一次返回 n 条表 episode。source 选择生成器，默认 discoscm。\n\n各来源语义不同：只有 discoscm 把行当成带潜变量的 unit。\n其它来源（scm / sklearn_* / openml / recsys）各有自己的行含义。\n共享的只是线上信封：完整 values + missing_mask + query_mask。\n目录见 GET /v0/sources。\n",
+    "description": "\n一次返回 n_episodes 条不同的 episode（默认 8），按 batch_size（默认 1）打包；设成 8 则组内同形状；下一组会重抽 d、k。source 默认 discoscm。\n\n各来源语义不同：只有 discoscm 把行当成带潜变量的 unit。\n其它来源（scm / sklearn_* / openml / recsys）各有自己的行含义。\n共享的只是线上信封：完整 values + missing_mask + query_mask。\n目录见 GET /v0/sources。\n",
     "contact": {
       "name": "tabuf-episode-api",
       "url": "https://github.com/1587causalai/tabuf-episode-api"
@@ -101,6 +101,61 @@
   },
   "components": {
     "schemas": {
+      "BatchEnvelope": {
+        "properties": {
+          "batch_index": {
+            "type": "integer",
+            "title": "Batch Index"
+          },
+          "n_units": {
+            "type": "integer",
+            "title": "N Units"
+          },
+          "n_features": {
+            "type": "integer",
+            "title": "N Features"
+          },
+          "unit_dim": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Dim"
+          },
+          "shape": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Shape"
+          },
+          "n_episodes": {
+            "type": "integer",
+            "title": "N Episodes"
+          },
+          "episodes": {
+            "items": {
+              "$ref": "#/components/schemas/Episode"
+            },
+            "type": "array",
+            "title": "Episodes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "batch_index",
+          "n_units",
+          "n_features",
+          "shape",
+          "n_episodes",
+          "episodes"
+        ],
+        "title": "BatchEnvelope"
+      },
       "Episode": {
         "properties": {
           "seed": {
@@ -175,7 +230,7 @@
         "properties": {
           "n_units": {
             "type": "integer",
-            "maximum": 4096.0,
+            "maximum": 100000.0,
             "minimum": 8.0,
             "title": "N Units",
             "description": "行数旋钮。只有 discoscm 把行解释成 unit；scm/sklearn 里是 n_samples",
@@ -196,19 +251,21 @@
               }
             ],
             "title": "N Features",
-            "description": "null 则从先验抽样（众数约 20，支持 2–1000）",
-            "default": null
+            "description": "null 则从先验抽样（众数约 20，支持 2–1000）"
           },
           "unit_dim": {
             "anyOf": [
-              {"type": "integer"},
-              {"type": "null"}
+              {
+                "type": "integer",
+                "maximum": 1024.0,
+                "minimum": 2.0
+              },
+              {
+                "type": "null"
+              }
             ],
-            "maximum": 1024.0,
-            "minimum": 2.0,
             "title": "Unit Dim",
-            "description": "discoscm-only：个体表征维 k。null 则从先验抽样（众数约 16，支持 2–1024）",
-            "default": null
+            "description": "discoscm-only：个体表征维 k。null 则从先验抽样（众数约 16，支持 2–1024）"
           },
           "query_frac": {
             "anyOf": [
@@ -246,6 +303,19 @@
             "title": "Query Mode",
             "description": "any_cell | label_cell。旧名 cells/observed_cells、label_column 仍接受。缺省用来源画像"
           },
+          "query_column": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Column",
+            "description": "label_cell 时只在该列按 query_frac 抽行；缺省最后一列"
+          },
           "sigma": {
             "type": "number",
             "maximum": 10.0,
@@ -265,11 +335,27 @@
             "title": "Seed",
             "default": 0
           },
+          "batch_size": {
+            "type": "integer",
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Batch Size",
+            "description": "一组同形状的条数，默认 1（每条自己抽 d、k）；设 8 则可堆 tensor",
+            "default": 1,
+            "examples": [
+              1
+            ]
+          },
           "n_episodes": {
             "type": "integer",
+            "maximum": 32.0,
             "minimum": 1.0,
             "title": "N Episodes",
-            "default": 1
+            "description": "不同生成世界的条数；可以大于 batch_size",
+            "default": 8,
+            "examples": [
+              8
+            ]
           },
           "type_weights": {
             "$ref": "#/components/schemas/TypeWeights",
@@ -303,8 +389,19 @@
               }
             ],
             "title": "Max Parents",
-            "description": "discoscm-only：None 时典型父节点上限 6 且允许少量 hub 超过；显式整数则为所有节点（含 hub）的硬上限",
-            "default": null
+            "description": "discoscm-only：None 时普通图父节点上限 6；显式整数为硬上限。星形枢纽是小概率混合臂，不是默认"
+          },
+          "graph_family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph Family",
+            "description": "discoscm-only：null 则 85% sparse / 15% star；可强制 sparse | star"
           },
           "token_heritability": {
             "type": "number",
@@ -367,6 +464,61 @@
             "type": "integer",
             "title": "N Episodes"
           },
+          "batch_size": {
+            "type": "integer",
+            "title": "Batch Size"
+          },
+          "n_batches": {
+            "type": "integer",
+            "title": "N Batches"
+          },
+          "n_units": {
+            "type": "integer",
+            "title": "N Units"
+          },
+          "n_features": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Features"
+          },
+          "unit_dim": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Dim"
+          },
+          "shape": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shape"
+          },
+          "batches": {
+            "items": {
+              "$ref": "#/components/schemas/BatchEnvelope"
+            },
+            "type": "array",
+            "title": "Batches"
+          },
           "episodes": {
             "items": {
               "$ref": "#/components/schemas/Episode"
@@ -378,6 +530,10 @@
         "type": "object",
         "required": [
           "n_episodes",
+          "batch_size",
+          "n_batches",
+          "n_units",
+          "batches",
           "episodes"
         ],
         "title": "EpisodeResponse"
@@ -433,6 +589,17 @@
           "n_features": {
             "type": "integer",
             "title": "N Features"
+          },
+          "unit_dim": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Dim"
           },
           "source": {
             "anyOf": [
@@ -517,6 +684,17 @@
               }
             ],
             "title": "Query Mode"
+          },
+          "query_column": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query Column"
           }
         },
         "type": "object",

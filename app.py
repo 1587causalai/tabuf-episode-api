@@ -47,7 +47,7 @@ class TypeWeights(BaseModel):
 
 
 class EpisodeRequest(BaseModel):
-    n_units: int = Field(default=1000, ge=8, le=4096, examples=[1000], description="行数旋钮。只有 discoscm 把行解释成 unit；scm/sklearn 里是 n_samples")
+    n_units: int = Field(default=1000, ge=8, le=100000, examples=[1000], description="行数旋钮。只有 discoscm 把行解释成 unit；scm/sklearn 里是 n_samples")
     n_features: int | None = Field(default=None, ge=2, le=1000, description="null 则从先验抽样（众数约 20，支持 2–1000）")
     unit_dim: int | None = Field(default=None, ge=2, le=1024, description="discoscm-only：个体表征维 k。null 则从先验抽样（众数约 16，支持 2–1024）")
     query_frac: float | None = Field(default=None, description="any_cell：全表比例；label_cell：目标列行比例。缺省 0.15")

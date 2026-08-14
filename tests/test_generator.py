@@ -676,3 +676,50 @@ def test_default_batch_size_is_one():
     assert len(eps) == 4
     batches = group_batches(eps, 1)
     assert len(batches) == 4
+
+
+def test_openml_profile_is_ready():
+    from sources import SOURCE_PROFILES, OPENML_CTR23_DEFAULT
+    assert SOURCE_PROFILES["openml"]["status"] == "ready"
+    assert SOURCE_PROFILES["openml"]["query_mode"] == "label_cell"
+    assert OPENML_CTR23_DEFAULT == 44970
+    assert SOURCE_PROFILES["recsys"]["status"] == "placeholder"
+
+
+def test_openml_native_shape_and_label_cell(monkeypatch):
+    import pandas as pd
+    from sklearn.datasets import fetch_openml as _real  # noqa: F401
+
+    class Bunch:
+        data = pd.DataFrame({
+            "a": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            "b": [0.5, 0.4, 0.3, 0.2, 0.1, 0.0, -0.1, -0.2],
+        })
+        target = pd.Series([10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0])
+        details = {"name": "fake_qsar"}
+
+    def fake_fetch(*_a, **_k):
+        return Bunch()
+
+    monkeypatch.setattr("sklearn.datasets.fetch_openml", fake_fetch)
+    ep = sample_episodes(
+        n_units=16, n_features=None, n_episodes=1, seed=0,
+        source="openml", source_name="44970", return_mechanism=True,
+    )[0]
+    t = ep["table"]
+    # native 2 features + y; table smaller than n_units is not padded
+    assert t["n_features"] == 3
+    assert t["n_rows"] == 8
+    assert t["n_units"] == 8
+    assert t["query_mode"] == "label_cell"
+    q = np.array(t["query_mask"])
+    n = q.shape[0]
+    n_q = max(1, min(int(round(0.15 * n)), n))
+    assert q[:, -1].sum() == n_q
+    assert not q[:, :-1].any()
+    assert t["shapes"]["n_missing"] == round(0.05 * n * 3)
+    mech = ep["mechanism"]
+    assert mech["data_id"] == 44970
+    assert mech["name"] == "fake_qsar"
+    assert mech["task"] == "regression"
+    assert "population" not in ep
