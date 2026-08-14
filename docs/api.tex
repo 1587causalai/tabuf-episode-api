@@ -101,7 +101,7 @@ HTTP/1.1，JSON，UTF-8。无鉴权。可复现性靠 \texttt{seed}。
 \texttt{n\_units} & 1000 & $[8,4096]$ & 共享（行数） & 仅 discoscm 把行当 unit；其它 $=n_{\mathrm{samples}}$ \\
 \texttt{n\_features} & null & $[2,1000]$ & 共享 & 列数；null 则 discoscm 从先验抽（众数约 20）；其它来源回退 20 \\
 \texttt{seed} & 0 & --- & 共享 & 第 $e$ 集用 $\mathrm{seed}+e$ \\
-\texttt{n\_episodes} & 1 & $[1,32]$ & 共享 & 条数；$>32$ 截成 32，不报错 \\
+\texttt{n\_episodes} & 8 & $[1,32]$ & 共享 & 条数，当作一个 batch；$>32$ 截成 32，不报错 \\
 \texttt{source} & discoscm & --- & 共享 & 生成器 canonical 名或别名 \\
 \texttt{source\_name} & null & --- & 别名 & 别名用的子名。canonical 已自带则忽略 \\
 \texttt{missing\_frac} & 画像 & $[0,0.95)$ & 共享 & \texttt{null} 则用该 source 画像 \\
@@ -127,7 +127,7 @@ HTTP/1.1，JSON，UTF-8。无鉴权。可复现性靠 \texttt{seed}。
 
 \begin{lstlisting}
 {
-  "n_episodes": 1,
+  "n_episodes": 8,
   "episodes": [{
     "seed": 0,
     "table": {

@@ -802,7 +802,7 @@ def sample_episodes(
     missing_frac: float | None = None,
     sigma: float = DEFAULT_SIGMA,
     seed: int | None = 0,
-    n_episodes: int = 1,
+    n_episodes: int = 8,
     debug: bool = False,
     return_mechanism: bool = False,
     column_normalize: bool = True,

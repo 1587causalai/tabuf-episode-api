@@ -600,3 +600,9 @@ def test_discoscm_label_column_query():
     assert ep["table"]["column_types"][3] in {
         "numeric", "ordinal", "binary", "categorical", "high_cardinality"
     }
+
+
+def test_default_n_episodes_is_eight():
+    eps = sample_episodes(n_units=8, n_features=4, seed=0, unit_dim=4)
+    assert len(eps) == 8
+    assert {ep["table"]["n_units"] for ep in eps} == {8}

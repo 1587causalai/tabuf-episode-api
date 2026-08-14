@@ -56,7 +56,7 @@ class EpisodeRequest(BaseModel):
     query_column: int | None = Field(default=None, ge=0, description="query_mode=label_column 时整列 query 的列下标；缺省最后一列")
     sigma: float = Field(default=0.3, ge=0.0, le=10.0)
     seed: int | None = Field(default=0)
-    n_episodes: int = Field(default=1, ge=1)
+    n_episodes: int = Field(default=8, ge=1, le=32, examples=[8], description="一次返回的 episode 条数，当作一个 batch；>32 截成 32")
     type_weights: TypeWeights = Field(default_factory=TypeWeights, description="discoscm-only：列类型抽样权重，不必归一化")
     independent_frac: float = Field(default=0.05, ge=0.0, le=1.0, description="discoscm-only：每列与其它特征独立的概率")
     dag_edge_p: float = Field(default=0.3, ge=0.0, le=1.0, description="discoscm-only：遗留字段，仍写入 response_law；新 DAG 不再按 Bernoulli(p) 连边")
