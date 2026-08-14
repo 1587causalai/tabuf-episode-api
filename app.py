@@ -53,6 +53,7 @@ class EpisodeRequest(BaseModel):
     query_frac: float | None = Field(default=None, description="缺省则用来源画像默认")
     missing_frac: float | None = Field(default=None, description="缺省则用来源画像默认")
     query_mode: str | None = Field(default=None, description="cells | label_column | observed_cells；缺省用来源画像")
+    query_column: int | None = Field(default=None, ge=0, description="query_mode=label_column 时整列 query 的列下标；缺省最后一列")
     sigma: float = Field(default=0.3, ge=0.0, le=10.0)
     seed: int | None = Field(default=0)
     n_episodes: int = Field(default=1, ge=1)
@@ -114,6 +115,7 @@ class Table(BaseModel):
     n_classes: list[int | None]
     shapes: TableShapes
     query_mode: str | None = None
+    query_column: int | None = None
 
 
 class Episode(BaseModel):
@@ -171,6 +173,7 @@ def create_episodes(req: EpisodeRequest) -> dict[str, Any]:
             source=req.source,
             source_name=req.source_name,
             query_mode=req.query_mode,
+            query_column=req.query_column,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -582,3 +582,21 @@ def test_population_mixture_can_be_multi_component():
             break
     assert 1 in seen
     assert max(seen) > 1
+
+
+def test_discoscm_label_column_query():
+    ep = sample_episodes(
+        n_units=20, n_features=8, n_episodes=1, seed=0,
+        query_mode="label_column", missing_frac=0.0, query_column=3,
+    )[0]
+    q = np.array(ep["table"]["query_mask"])
+    m = np.array(ep["table"]["missing_mask"])
+    assert ep["table"]["query_mode"] == "label_column"
+    assert ep["table"]["query_column"] == 3
+    assert q.shape == (20, 8)
+    assert q[:, 3].all()
+    assert not q[:, :3].any() and not q[:, 4:].any()
+    assert m.sum() == 0
+    assert ep["table"]["column_types"][3] in {
+        "numeric", "ordinal", "binary", "categorical", "high_cardinality"
+    }

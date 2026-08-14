@@ -598,6 +598,42 @@ def _realize_column(
     return y.astype(np.int64), meta
 
 
+
+def _compile_masks(
+    rng: np.random.Generator,
+    n: int,
+    d: int,
+    missing_frac: float,
+    query_frac: float,
+    query_mode: str | None = None,
+    query_column: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, str, int | None]:
+    """MCAR cell missing; query is either scattered cells or one whole column."""
+    n_cells = n * d
+    missing_frac = float(np.clip(missing_frac, 0.0, 0.95))
+    query_frac = float(np.clip(query_frac, 0.0, 0.95))
+    n_miss = max(0, min(int(round(missing_frac * n_cells)), n_cells))
+    missing_flat = np.zeros(n_cells, dtype=bool)
+    if n_miss:
+        missing_flat[rng.choice(n_cells, size=n_miss, replace=False)] = True
+    missing_mask = missing_flat.reshape(n, d)
+    mode = query_mode or "cells"
+    query_mask = np.zeros((n, d), dtype=bool)
+    held = None
+    if mode == "label_column":
+        held = d - 1 if query_column is None else int(query_column)
+        held = int(np.clip(held, 0, d - 1))
+        query_mask[:, held] = True
+        mode = "label_column"
+    else:
+        n_query = max(1, min(int(round(query_frac * n_cells)), n_cells))
+        query_flat = np.zeros(n_cells, dtype=bool)
+        query_flat[rng.choice(n_cells, size=n_query, replace=False)] = True
+        query_mask = query_flat.reshape(n, d)
+        mode = "observed_cells" if mode == "observed_cells" else "cells"
+    return missing_mask, query_mask, mode, held
+
+
 def sample_episode(
     rng: np.random.Generator,
     *,
@@ -619,6 +655,8 @@ def sample_episode(
     beta_min: float = DEFAULT_BETA_MIN,
     beta_max: float = DEFAULT_BETA_MAX,
     graph_family: str | None = None,
+    query_mode: str | None = None,
+    query_column: int | None = None,
 ) -> dict[str, Any]:
     n = int(n_units)
     d, n_features_sampled = _resolve_n_features(n_features, rng)
@@ -684,17 +722,9 @@ def sample_episode(
             row.append(int(v) if n_classes[j] is not None else float(v))
         values.append(row)
 
-    missing_frac = float(np.clip(missing_frac, 0.0, 0.95))
-    query_frac = float(np.clip(query_frac, 0.0, 0.95))
-    n_miss = max(0, min(int(round(missing_frac * n_cells)), n_cells))
-    n_query = max(1, min(int(round(query_frac * n_cells)), n_cells))
-    missing_flat = np.zeros(n_cells, dtype=bool)
-    query_flat = np.zeros(n_cells, dtype=bool)
-    if n_miss:
-        missing_flat[rng.choice(n_cells, size=n_miss, replace=False)] = True
-    query_flat[rng.choice(n_cells, size=n_query, replace=False)] = True
-    missing_mask = missing_flat.reshape(n, d)
-    query_mask = query_flat.reshape(n, d)
+    missing_mask, query_mask, qmode, held = _compile_masks(
+        rng, n, d, missing_frac, query_frac, query_mode, query_column
+    )
 
     table: dict[str, Any] = {
         "n_units": n,
@@ -714,7 +744,8 @@ def sample_episode(
             "n_query": int(query_mask.sum()),
             "n_query_and_missing": int((query_mask & missing_mask).sum()),
         },
-        "query_mode": "cells",
+        "query_mode": qmode,
+        "query_column": held,
     }
     payload: dict[str, Any] = {"seed": seed, "table": table}
 
@@ -786,6 +817,7 @@ def sample_episodes(
     source: str = "discoscm",
     source_name: str | None = None,
     query_mode: str | None = None,
+    query_column: int | None = None,
 ) -> list[dict[str, Any]]:
     n_episodes = max(1, min(int(n_episodes), 32))
     if seed is None:
@@ -863,6 +895,8 @@ def sample_episodes(
                 beta_min=beta_min,
                 beta_max=beta_max,
                 graph_family=graph_family,
+                query_mode=qmode,
+                query_column=query_column,
             )
         else:
             d_use = (

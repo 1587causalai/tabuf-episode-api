@@ -54,6 +54,7 @@ _SHARED = (
     "missing_frac",
     "query_frac",
     "query_mode",
+    "query_column",
     "return_mechanism",
 )
 _DISCOSCM_ONLY = ("unit_dim", "type_weights", "independent_frac", "dag_edge_p", "max_parents", "token_heritability", "beta_min", "beta_max", "graph_family")
