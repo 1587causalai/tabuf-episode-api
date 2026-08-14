@@ -606,3 +606,21 @@ def test_default_n_episodes_is_eight():
     eps = sample_episodes(n_units=8, n_features=4, seed=0, unit_dim=4)
     assert len(eps) == 8
     assert {ep["table"]["n_units"] for ep in eps} == {8}
+
+
+def test_batch_shares_shape():
+    eps = sample_episodes(
+        n_units=16, n_features=None, unit_dim=None, seed=0, batch_size=8,
+    )
+    assert len(eps) == 8
+    ds = {ep["table"]["n_features"] for ep in eps}
+    ks = {ep["table"]["unit_dim"] for ep in eps}
+    ns = {ep["table"]["n_units"] for ep in eps}
+    assert len(ds) == 1 and len(ks) == 1 and ns == {16}
+
+
+def test_n_episodes_alias_for_batch_size():
+    a = sample_episodes(n_units=8, n_features=4, unit_dim=4, seed=1, n_episodes=3)
+    b = sample_episodes(n_units=8, n_features=4, unit_dim=4, seed=1, batch_size=3)
+    assert len(a) == len(b) == 3
+    assert a[0]["table"]["values"] == b[0]["table"]["values"]

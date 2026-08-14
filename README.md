@@ -64,12 +64,12 @@ docker run --rm -p 8787:8787 tabuf-episode-api
   "query_frac": 0.15,
   "sigma": 0.3,
   "seed": 0,
-  "n_episodes": 8,
+  "batch_size": 8,
   "debug": false
 }
 ```
 
-`n_units` 默认 $1000$（上限 $4096$）。`n_episodes` 默认 $8$（当作一个 batch，上限 $32$）。下面 curl 用 $16$ 行、$1$ 条只是为了拷贝轻量。
+`n_units` 默认 $1000$（上限 $4096$）。`batch_size` 默认 $8$（`n_episodes` 是别名，上限 $32$）。一个 batch 共用 $n,d,k$，并行生成。下面 curl 用 $16$ 行、$1$ 条只是为了拷贝轻量。
 
 返回每个 episode：`table.values`（完整表）、`table.missing_mask`、`table.query_mask`、`shapes`、`seed`。两张 mask 独立抽取，允许重合。
 

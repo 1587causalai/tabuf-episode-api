@@ -50,6 +50,7 @@ _SHARED = (
     "n_features",
     "seed",
     "n_episodes",
+    "batch_size",
     "source",
     "missing_frac",
     "query_frac",

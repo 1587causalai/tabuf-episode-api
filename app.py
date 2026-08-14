@@ -12,7 +12,7 @@ from generator import sample_episodes
 VERSION = "v0"
 
 DESCRIPTION = """
-一次返回 n 条表 episode。source 选择生成器，默认 discoscm。
+一次返回一个 batch（默认 8 条同形状 episode，线程并行生成）。source 选择生成器，默认 discoscm。
 
 各来源语义不同：只有 discoscm 把行当成带潜变量的 unit。
 其它来源（scm / sklearn_* / openml / recsys）各有自己的行含义。
@@ -56,7 +56,8 @@ class EpisodeRequest(BaseModel):
     query_column: int | None = Field(default=None, ge=0, description="query_mode=label_column 时整列 query 的列下标；缺省最后一列")
     sigma: float = Field(default=0.3, ge=0.0, le=10.0)
     seed: int | None = Field(default=0)
-    n_episodes: int = Field(default=8, ge=1, le=32, examples=[8], description="一次返回的 episode 条数，当作一个 batch；>32 截成 32")
+    batch_size: int | None = Field(default=None, ge=1, le=32, examples=[8], description="一个 batch 的条数，默认 8；同 batch 共用 n_units / n_features / unit_dim")
+    n_episodes: int | None = Field(default=None, ge=1, le=32, description="batch_size 的别名；只写这个也行")
     type_weights: TypeWeights = Field(default_factory=TypeWeights, description="discoscm-only：列类型抽样权重，不必归一化")
     independent_frac: float = Field(default=0.05, ge=0.0, le=1.0, description="discoscm-only：每列与其它特征独立的概率")
     dag_edge_p: float = Field(default=0.3, ge=0.0, le=1.0, description="discoscm-only：遗留字段，仍写入 response_law；新 DAG 不再按 Bernoulli(p) 连边")
@@ -82,10 +83,21 @@ class EpisodeRequest(BaseModel):
     return_mechanism: bool = Field(default=False)
     debug: bool = Field(default=False)
 
-    @field_validator("n_episodes")
+    @model_validator(mode="before")
     @classmethod
-    def cap_episodes(cls, v: int) -> int:
-        return max(1, min(int(v), 32))
+    def resolve_batch_size(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if data.get("batch_size") is not None:
+            n = int(data["batch_size"])
+        elif data.get("n_episodes") is not None:
+            n = int(data["n_episodes"])
+        else:
+            n = 8
+        n = max(1, min(n, 32))
+        data["batch_size"] = n
+        data["n_episodes"] = n
+        return data
 
     @model_validator(mode="after")
     def beta_range(self) -> "EpisodeRequest":
@@ -107,6 +119,7 @@ class Table(BaseModel):
     n_units: int
     n_rows: int | None = None
     n_features: int
+    unit_dim: int | None = None
     source: str | None = None
     values: list[list[float | int]]
     missing_mask: list[list[bool]]
@@ -128,7 +141,12 @@ class Episode(BaseModel):
 
 
 class EpisodeResponse(BaseModel):
+    batch_size: int
     n_episodes: int
+    n_units: int
+    n_features: int
+    unit_dim: int | None = None
+    shape: list[int]
     episodes: list[Episode]
 
 
@@ -160,6 +178,7 @@ def create_episodes(req: EpisodeRequest) -> dict[str, Any]:
             sigma=req.sigma,
             seed=req.seed,
             n_episodes=req.n_episodes,
+            batch_size=req.batch_size,
             debug=req.debug,
             return_mechanism=req.return_mechanism,
             type_weights=req.type_weights.model_dump(),
@@ -179,4 +198,13 @@ def create_episodes(req: EpisodeRequest) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
-    return {"n_episodes": len(episodes), "episodes": episodes}
+    t0 = episodes[0]["table"]
+    return {
+        "batch_size": len(episodes),
+        "n_episodes": len(episodes),
+        "n_units": t0["n_units"],
+        "n_features": t0["n_features"],
+        "unit_dim": t0.get("unit_dim"),
+        "shape": [t0["n_units"], t0["n_features"]],
+        "episodes": episodes,
+    }

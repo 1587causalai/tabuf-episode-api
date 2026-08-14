@@ -16,7 +16,9 @@ see sources.SOURCE_PROFILES. The shared contract is the table wire only.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
+import os
 
 import numpy as np
 
@@ -730,6 +732,7 @@ def sample_episode(
         "n_units": n,
         "n_rows": n,
         "n_features": d,
+        "unit_dim": k,
         "source": "discoscm",
         "values": values,
         "missing_mask": _json_bool_grid(missing_mask),
@@ -793,6 +796,87 @@ def sample_episode(
     return payload
 
 
+def _sample_one_episode_job(job: dict[str, Any]) -> dict[str, Any]:
+    """One episode. Module-level so a thread/process pool can call it."""
+    from sources import (
+        SKLEARN_REAL_CANONICAL,
+        SKLEARN_SYNTH_CANONICAL,
+        openml_table,
+        recsys_table,
+        resolve_profile,
+        scm_anm,
+        sklearn_real,
+        sklearn_synthetic,
+    )
+
+    ep_seed = int(job["ep_seed"])
+    rng = np.random.default_rng(ep_seed)
+    resolved_src = job["resolved_src"]
+    resolved_name = job["resolved_name"]
+    prof = resolve_profile(
+        resolved_src,
+        query_mode=job.get("query_mode"),
+        missing_frac=job.get("missing_frac"),
+        query_frac=job.get("query_frac"),
+    )
+    mf = float(prof["missing_frac"])
+    qf = float(prof["query_frac"])
+    qmode = str(prof["query_mode"])
+    n_units = job["n_units"]
+    n_features = job["n_features"]
+    unit_dim = job["unit_dim"]
+    if resolved_src == "discoscm":
+        return sample_episode(
+            rng,
+            n_units=n_units,
+            n_features=n_features,
+            unit_dim=unit_dim,
+            query_frac=qf,
+            missing_frac=mf,
+            sigma=job["sigma"],
+            column_normalize=job["column_normalize"],
+            debug=job["debug"],
+            return_mechanism=job["return_mechanism"],
+            seed=ep_seed,
+            type_weights=job["type_weights"],
+            independent_frac=job["independent_frac"],
+            dag_edge_p=job["dag_edge_p"],
+            max_parents=job["max_parents"],
+            token_heritability=job["token_heritability"],
+            beta_min=job["beta_min"],
+            beta_max=job["beta_max"],
+            graph_family=job["graph_family"],
+            query_mode=qmode,
+            query_column=job.get("query_column"),
+        )
+    kw = dict(
+        rng=rng,
+        n_units=n_units,
+        n_features=n_features,
+        missing_frac=mf,
+        query_frac=qf,
+        seed=ep_seed,
+        return_mechanism=job["return_mechanism"],
+        query_mode=qmode,
+        source=resolved_src,
+    )
+    if resolved_src in SKLEARN_SYNTH_CANONICAL:
+        ep = sklearn_synthetic(source_name=resolved_name, **kw)
+    elif resolved_src in SKLEARN_REAL_CANONICAL:
+        ep = sklearn_real(source_name=resolved_name, **kw)
+    elif resolved_src == "scm":
+        ep = scm_anm(sigma=job["sigma"], **kw)
+    elif resolved_src == "openml":
+        ep = openml_table(source_name=job.get("source_name"), **kw)
+    elif resolved_src == "recsys":
+        ep = recsys_table(source_name=job.get("source_name"), **kw)
+    else:
+        raise ValueError("unknown source %r" % resolved_src)
+    ep.pop("population", None)
+    ep.pop("response_law", None)
+    return ep
+
+
 def sample_episodes(
     *,
     n_units: int = 1000,
@@ -802,7 +886,8 @@ def sample_episodes(
     missing_frac: float | None = None,
     sigma: float = DEFAULT_SIGMA,
     seed: int | None = 0,
-    n_episodes: int = 8,
+    n_episodes: int | None = None,
+    batch_size: int | None = None,
     debug: bool = False,
     return_mechanism: bool = False,
     column_normalize: bool = True,
@@ -819,7 +904,19 @@ def sample_episodes(
     query_mode: str | None = None,
     query_column: int | None = None,
 ) -> list[dict[str, Any]]:
-    n_episodes = max(1, min(int(n_episodes), 32))
+    """Draw a batch of episodes that share (n_units, n_features, unit_dim).
+
+    ``batch_size`` is the count (default 8). ``n_episodes`` is an alias.
+    Shape priors are drawn once for the batch, then each episode is filled
+    in a thread pool (independent RNG: seed, seed+1, ...).
+    """
+    if batch_size is not None:
+        n_batch = int(batch_size)
+    elif n_episodes is not None:
+        n_batch = int(n_episodes)
+    else:
+        n_batch = 8
+    n_batch = max(1, min(n_batch, 32))
     if seed is None:
         base = int(np.random.default_rng().integers(0, 2**31 - 1))
     else:
@@ -831,100 +928,72 @@ def sample_episodes(
         SKLEARN_SYNTH_CANONICAL,
         SKLEARN_SYNTH_MAKER_TO_SOURCE,
         SOURCES,
-        openml_table,
-        recsys_table,
-        resolve_profile,
-        scm_anm,
-        sklearn_real,
-        sklearn_synthetic,
     )
+
     src = (source or "discoscm").lower()
     if src not in SOURCES:
         raise ValueError(
             "unknown source %r; use %s" % (src, ", ".join(CANONICAL_SOURCES))
         )
-    episodes: list[dict[str, Any]] = []
-    for e in range(n_episodes):
-        ep_seed = base + e
-        rng = np.random.default_rng(ep_seed)
-        resolved_src = src
-        resolved_name = source_name
-        if src == "sklearn_synthetic":
-            makers = list(SKLEARN_SYNTH_CANONICAL.values())
-            resolved_name = source_name or str(rng.choice(makers))
-            if resolved_name not in SKLEARN_SYNTH_MAKER_TO_SOURCE:
-                raise ValueError("unknown sklearn synthetic maker: %s" % resolved_name)
-            resolved_src = SKLEARN_SYNTH_MAKER_TO_SOURCE[resolved_name]
-        elif src == "sklearn_real":
-            datasets = list(SKLEARN_REAL_CANONICAL.values())
-            resolved_name = source_name or str(rng.choice(datasets))
-            if resolved_name not in SKLEARN_REAL_DS_TO_SOURCE:
-                raise ValueError("unknown sklearn real dataset: %s" % resolved_name)
-            resolved_src = SKLEARN_REAL_DS_TO_SOURCE[resolved_name]
-        elif src in SKLEARN_SYNTH_CANONICAL:
-            resolved_name = SKLEARN_SYNTH_CANONICAL[src]
-        elif src in SKLEARN_REAL_CANONICAL:
-            resolved_name = SKLEARN_REAL_CANONICAL[src]
-        prof = resolve_profile(
-            resolved_src,
-            query_mode=query_mode,
-            missing_frac=missing_frac,
-            query_frac=query_frac,
+
+    shape_rng = np.random.default_rng(base)
+    resolved_src = src
+    resolved_name = source_name
+    if src == "sklearn_synthetic":
+        makers = list(SKLEARN_SYNTH_CANONICAL.values())
+        resolved_name = source_name or str(shape_rng.choice(makers))
+        if resolved_name not in SKLEARN_SYNTH_MAKER_TO_SOURCE:
+            raise ValueError("unknown sklearn synthetic maker: %s" % resolved_name)
+        resolved_src = SKLEARN_SYNTH_MAKER_TO_SOURCE[resolved_name]
+    elif src == "sklearn_real":
+        datasets = list(SKLEARN_REAL_CANONICAL.values())
+        resolved_name = source_name or str(shape_rng.choice(datasets))
+        if resolved_name not in SKLEARN_REAL_DS_TO_SOURCE:
+            raise ValueError("unknown sklearn real dataset: %s" % resolved_name)
+        resolved_src = SKLEARN_REAL_DS_TO_SOURCE[resolved_name]
+    elif src in SKLEARN_SYNTH_CANONICAL:
+        resolved_name = SKLEARN_SYNTH_CANONICAL[src]
+    elif src in SKLEARN_REAL_CANONICAL:
+        resolved_name = SKLEARN_REAL_CANONICAL[src]
+
+    if resolved_src == "discoscm":
+        d_use, _ = _resolve_n_features(n_features, shape_rng)
+        k_use, _ = _resolve_unit_dim(unit_dim, shape_rng)
+    else:
+        d_use = (
+            DEFAULT_N_FEATURES_FALLBACK
+            if n_features is None
+            else int(np.clip(int(n_features), N_FEATURES_MIN, N_FEATURES_MAX))
         )
-        mf = float(prof["missing_frac"])
-        qf = float(prof["query_frac"])
-        qmode = str(prof["query_mode"])
-        if resolved_src == "discoscm":
-            ep = sample_episode(
-                rng,
-                n_units=n_units,
-                n_features=n_features,
-                unit_dim=unit_dim,
-                query_frac=qf,
-                missing_frac=mf,
-                sigma=sigma,
-                column_normalize=column_normalize,
-                debug=debug,
-                return_mechanism=return_mechanism,
-                seed=ep_seed,
-                type_weights=type_weights,
-                independent_frac=independent_frac,
-                dag_edge_p=dag_edge_p,
-                max_parents=max_parents,
-                token_heritability=token_heritability,
-                beta_min=beta_min,
-                beta_max=beta_max,
-                graph_family=graph_family,
-                query_mode=qmode,
-                query_column=query_column,
-            )
-        else:
-            d_use = (
-                DEFAULT_N_FEATURES_FALLBACK
-                if n_features is None
-                else int(np.clip(int(n_features), N_FEATURES_MIN, N_FEATURES_MAX))
-            )
-            kw = dict(
-                rng=rng, n_units=n_units, n_features=d_use,
-                missing_frac=mf, query_frac=qf,
-                seed=ep_seed, return_mechanism=return_mechanism,
-                query_mode=qmode, source=resolved_src,
-            )
-            if resolved_src in SKLEARN_SYNTH_CANONICAL:
-                ep = sklearn_synthetic(source_name=resolved_name, **kw)
-            elif resolved_src in SKLEARN_REAL_CANONICAL:
-                ep = sklearn_real(source_name=resolved_name, **kw)
-            elif resolved_src == "scm":
-                ep = scm_anm(sigma=sigma, **kw)
-            elif resolved_src == "openml":
-                ep = openml_table(source_name=source_name, **kw)
-            elif resolved_src == "recsys":
-                ep = recsys_table(source_name=source_name, **kw)
-            else:
-                raise ValueError(
-                    "unknown source %r; use %s" % (src, ", ".join(CANONICAL_SOURCES))
-                )
-            ep.pop("population", None)
-            ep.pop("response_law", None)
-        episodes.append(ep)
-    return episodes
+        k_use = None
+
+    job_base = {
+        "resolved_src": resolved_src,
+        "resolved_name": resolved_name,
+        "source_name": source_name,
+        "n_units": int(n_units),
+        "n_features": int(d_use),
+        "unit_dim": k_use,
+        "query_mode": query_mode,
+        "missing_frac": missing_frac,
+        "query_frac": query_frac,
+        "sigma": sigma,
+        "column_normalize": column_normalize,
+        "debug": debug,
+        "return_mechanism": return_mechanism,
+        "type_weights": type_weights,
+        "independent_frac": independent_frac,
+        "dag_edge_p": dag_edge_p,
+        "max_parents": max_parents,
+        "token_heritability": token_heritability,
+        "beta_min": beta_min,
+        "beta_max": beta_max,
+        "graph_family": graph_family,
+        "query_column": query_column,
+    }
+    jobs = [{**job_base, "ep_seed": base + e} for e in range(n_batch)]
+    workers = min(n_batch, os.cpu_count() or 1)
+    if n_batch == 1 or workers <= 1:
+        return [_sample_one_episode_job(job) for job in jobs]
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(_sample_one_episode_job, jobs))
