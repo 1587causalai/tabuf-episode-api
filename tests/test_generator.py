@@ -619,8 +619,15 @@ def test_batch_shares_shape():
     assert len(ds) == 1 and len(ks) == 1 and ns == {16}
 
 
-def test_n_episodes_alias_for_batch_size():
-    a = sample_episodes(n_units=8, n_features=4, unit_dim=4, seed=1, n_episodes=3)
-    b = sample_episodes(n_units=8, n_features=4, unit_dim=4, seed=1, batch_size=3)
-    assert len(a) == len(b) == 3
-    assert a[0]["table"]["values"] == b[0]["table"]["values"]
+def test_n_episodes_packs_into_shape_batches():
+    eps = sample_episodes(
+        n_units=16, n_features=None, unit_dim=None,
+        seed=0, n_episodes=16, batch_size=8,
+    )
+    assert len(eps) == 16
+    d0 = {ep["table"]["n_features"] for ep in eps[:8]}
+    d1 = {ep["table"]["n_features"] for ep in eps[8:]}
+    k0 = {ep["table"]["unit_dim"] for ep in eps[:8]}
+    k1 = {ep["table"]["unit_dim"] for ep in eps[8:]}
+    assert len(d0) == 1 and len(d1) == 1 and len(k0) == 1 and len(k1) == 1
+    assert {ep["seed"] for ep in eps} == set(range(16))

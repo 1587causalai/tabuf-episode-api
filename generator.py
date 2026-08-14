@@ -877,6 +877,36 @@ def _sample_one_episode_job(job: dict[str, Any]) -> dict[str, Any]:
     return ep
 
 
+def _shape_rng(base: int, batch_index: int) -> np.random.Generator:
+    return np.random.default_rng(
+        np.random.SeedSequence([int(base), 0x53485045, int(batch_index)])
+    )
+
+
+def group_batches(
+    episodes: list[dict[str, Any]],
+    batch_size: int,
+) -> list[dict[str, Any]]:
+    """Split a flat episode list into same-shape training batches."""
+    bs = max(1, int(batch_size))
+    out: list[dict[str, Any]] = []
+    for b, start in enumerate(range(0, len(episodes), bs)):
+        chunk = episodes[start : start + bs]
+        t0 = chunk[0]["table"]
+        out.append(
+            {
+                "batch_index": b,
+                "n_units": t0["n_units"],
+                "n_features": t0["n_features"],
+                "unit_dim": t0.get("unit_dim"),
+                "shape": [t0["n_units"], t0["n_features"]],
+                "n_episodes": len(chunk),
+                "episodes": chunk,
+            }
+        )
+    return out
+
+
 def sample_episodes(
     *,
     n_units: int = 1000,
@@ -904,19 +934,17 @@ def sample_episodes(
     query_mode: str | None = None,
     query_column: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Draw a batch of episodes that share (n_units, n_features, unit_dim).
+    """Draw distinct episodes, packed into same-shape batches.
 
-    ``batch_size`` is the count (default 8). ``n_episodes`` is an alias.
-    Shape priors are drawn once for the batch, then each episode is filled
-    in a thread pool (independent RNG: seed, seed+1, ...).
+    ``n_episodes`` is how many different worlds to draw (default 8).
+    ``batch_size`` is the GPU pack (default 8): within a batch, n/d/k are
+    shared; the next batch re-samples d and k (if they were left null).
+    Episode content uses seed, seed+1, ... independently of the shape stream.
     """
-    if batch_size is not None:
-        n_batch = int(batch_size)
-    elif n_episodes is not None:
-        n_batch = int(n_episodes)
-    else:
-        n_batch = 8
-    n_batch = max(1, min(n_batch, 32))
+    n_ep = 8 if n_episodes is None else int(n_episodes)
+    bs = 8 if batch_size is None else int(batch_size)
+    n_ep = max(1, min(n_ep, 32))
+    bs = max(1, min(bs, 32))
     if seed is None:
         base = int(np.random.default_rng().integers(0, 2**31 - 1))
     else:
@@ -936,18 +964,18 @@ def sample_episodes(
             "unknown source %r; use %s" % (src, ", ".join(CANONICAL_SOURCES))
         )
 
-    shape_rng = np.random.default_rng(base)
+    src_rng = np.random.default_rng(np.random.SeedSequence([base, 0x535243]))
     resolved_src = src
     resolved_name = source_name
     if src == "sklearn_synthetic":
         makers = list(SKLEARN_SYNTH_CANONICAL.values())
-        resolved_name = source_name or str(shape_rng.choice(makers))
+        resolved_name = source_name or str(src_rng.choice(makers))
         if resolved_name not in SKLEARN_SYNTH_MAKER_TO_SOURCE:
             raise ValueError("unknown sklearn synthetic maker: %s" % resolved_name)
         resolved_src = SKLEARN_SYNTH_MAKER_TO_SOURCE[resolved_name]
     elif src == "sklearn_real":
         datasets = list(SKLEARN_REAL_CANONICAL.values())
-        resolved_name = source_name or str(shape_rng.choice(datasets))
+        resolved_name = source_name or str(src_rng.choice(datasets))
         if resolved_name not in SKLEARN_REAL_DS_TO_SOURCE:
             raise ValueError("unknown sklearn real dataset: %s" % resolved_name)
         resolved_src = SKLEARN_REAL_DS_TO_SOURCE[resolved_name]
@@ -956,24 +984,11 @@ def sample_episodes(
     elif src in SKLEARN_REAL_CANONICAL:
         resolved_name = SKLEARN_REAL_CANONICAL[src]
 
-    if resolved_src == "discoscm":
-        d_use, _ = _resolve_n_features(n_features, shape_rng)
-        k_use, _ = _resolve_unit_dim(unit_dim, shape_rng)
-    else:
-        d_use = (
-            DEFAULT_N_FEATURES_FALLBACK
-            if n_features is None
-            else int(np.clip(int(n_features), N_FEATURES_MIN, N_FEATURES_MAX))
-        )
-        k_use = None
-
     job_base = {
         "resolved_src": resolved_src,
         "resolved_name": resolved_name,
         "source_name": source_name,
         "n_units": int(n_units),
-        "n_features": int(d_use),
-        "unit_dim": k_use,
         "query_mode": query_mode,
         "missing_frac": missing_frac,
         "query_frac": query_frac,
@@ -991,9 +1006,33 @@ def sample_episodes(
         "graph_family": graph_family,
         "query_column": query_column,
     }
-    jobs = [{**job_base, "ep_seed": base + e} for e in range(n_batch)]
-    workers = min(n_batch, os.cpu_count() or 1)
-    if n_batch == 1 or workers <= 1:
+    jobs: list[dict[str, Any]] = []
+    n_batches = (n_ep + bs - 1) // bs
+    for b in range(n_batches):
+        start = b * bs
+        stop = min(start + bs, n_ep)
+        shape_rng = _shape_rng(base, b)
+        if resolved_src == "discoscm":
+            d_use, _ = _resolve_n_features(n_features, shape_rng)
+            k_use, _ = _resolve_unit_dim(unit_dim, shape_rng)
+        else:
+            d_use = (
+                DEFAULT_N_FEATURES_FALLBACK
+                if n_features is None
+                else int(np.clip(int(n_features), N_FEATURES_MIN, N_FEATURES_MAX))
+            )
+            k_use = None
+        for e in range(start, stop):
+            jobs.append(
+                {
+                    **job_base,
+                    "n_features": int(d_use),
+                    "unit_dim": k_use,
+                    "ep_seed": base + e,
+                }
+            )
+    workers = min(len(jobs), os.cpu_count() or 1)
+    if len(jobs) == 1 or workers <= 1:
         return [_sample_one_episode_job(job) for job in jobs]
     with ThreadPoolExecutor(max_workers=workers) as pool:
         return list(pool.map(_sample_one_episode_job, jobs))

@@ -7,12 +7,12 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from generator import sample_episodes
+from generator import group_batches, sample_episodes
 
 VERSION = "v0"
 
 DESCRIPTION = """
-一次返回一个 batch（默认 8 条同形状 episode，线程并行生成）。source 选择生成器，默认 discoscm。
+一次返回 n_episodes 条不同的 episode（默认 8），按 batch_size（默认 8）打包成同形状的 batch；下一组会重抽 d、k。source 默认 discoscm。
 
 各来源语义不同：只有 discoscm 把行当成带潜变量的 unit。
 其它来源（scm / sklearn_* / openml / recsys）各有自己的行含义。
@@ -56,8 +56,8 @@ class EpisodeRequest(BaseModel):
     query_column: int | None = Field(default=None, ge=0, description="query_mode=label_column 时整列 query 的列下标；缺省最后一列")
     sigma: float = Field(default=0.3, ge=0.0, le=10.0)
     seed: int | None = Field(default=0)
-    batch_size: int | None = Field(default=None, ge=1, le=32, examples=[8], description="一个 batch 的条数，默认 8；同 batch 共用 n_units / n_features / unit_dim")
-    n_episodes: int | None = Field(default=None, ge=1, le=32, description="batch_size 的别名；只写这个也行")
+    batch_size: int = Field(default=8, ge=1, le=32, examples=[8], description="一个训练 batch 的条数；组内共用 n/d/k，下一组重抽 d、k")
+    n_episodes: int = Field(default=8, ge=1, le=32, examples=[8], description="不同生成世界的条数；可以大于 batch_size")
     type_weights: TypeWeights = Field(default_factory=TypeWeights, description="discoscm-only：列类型抽样权重，不必归一化")
     independent_frac: float = Field(default=0.05, ge=0.0, le=1.0, description="discoscm-only：每列与其它特征独立的概率")
     dag_edge_p: float = Field(default=0.3, ge=0.0, le=1.0, description="discoscm-only：遗留字段，仍写入 response_law；新 DAG 不再按 Bernoulli(p) 连边")
@@ -82,22 +82,6 @@ class EpisodeRequest(BaseModel):
     )
     return_mechanism: bool = Field(default=False)
     debug: bool = Field(default=False)
-
-    @model_validator(mode="before")
-    @classmethod
-    def resolve_batch_size(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        if data.get("batch_size") is not None:
-            n = int(data["batch_size"])
-        elif data.get("n_episodes") is not None:
-            n = int(data["n_episodes"])
-        else:
-            n = 8
-        n = max(1, min(n, 32))
-        data["batch_size"] = n
-        data["n_episodes"] = n
-        return data
 
     @model_validator(mode="after")
     def beta_range(self) -> "EpisodeRequest":
@@ -140,13 +124,25 @@ class Episode(BaseModel):
     S: list[list[float]] | None = None
 
 
-class EpisodeResponse(BaseModel):
-    batch_size: int
-    n_episodes: int
+class BatchEnvelope(BaseModel):
+    batch_index: int
     n_units: int
     n_features: int
     unit_dim: int | None = None
     shape: list[int]
+    n_episodes: int
+    episodes: list[Episode]
+
+
+class EpisodeResponse(BaseModel):
+    n_episodes: int
+    batch_size: int
+    n_batches: int
+    n_units: int
+    n_features: int | None = None
+    unit_dim: int | None = None
+    shape: list[int] | None = None
+    batches: list[BatchEnvelope]
     episodes: list[Episode]
 
 
@@ -198,13 +194,17 @@ def create_episodes(req: EpisodeRequest) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
-    t0 = episodes[0]["table"]
-    return {
-        "batch_size": len(episodes),
+    batches = group_batches(episodes, req.batch_size)
+    payload: dict[str, Any] = {
         "n_episodes": len(episodes),
-        "n_units": t0["n_units"],
-        "n_features": t0["n_features"],
-        "unit_dim": t0.get("unit_dim"),
-        "shape": [t0["n_units"], t0["n_features"]],
+        "batch_size": req.batch_size,
+        "n_batches": len(batches),
+        "n_units": req.n_units,
+        "batches": batches,
         "episodes": episodes,
     }
+    if len(batches) == 1:
+        payload["n_features"] = batches[0]["n_features"]
+        payload["unit_dim"] = batches[0].get("unit_dim")
+        payload["shape"] = batches[0]["shape"]
+    return payload

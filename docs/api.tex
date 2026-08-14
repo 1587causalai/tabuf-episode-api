@@ -61,7 +61,7 @@
 
 给要正确调用本服务的 Agent 或程序。不是生成手册。
 
-\texttt{POST /v0/episodes} 返回一个 batch（默认 8 条同形状 episode，并行生成）。
+\texttt{POST /v0/episodes} 返回 $n_{\mathrm{episodes}}$ 条不同 episode（默认 8），按 \texttt{batch\_size}（默认 8）打包；组内同形状，下一组重抽 $d,k$。
 每条含 \texttt{values}、\texttt{missing\_mask}、\texttt{query\_mask}。
 没有额外的 $y$。只拿 \texttt{table} 训练。
 
@@ -99,10 +99,10 @@ HTTP/1.1，JSON，UTF-8。无鉴权。可复现性靠 \texttt{seed}。
 字段 & 默认 & 范围 & 谁认 & 含义 \\
 \midrule
 \texttt{n\_units} & 1000 & $[8,4096]$ & 共享（行数） & 仅 discoscm 把行当 unit；其它 $=n_{\mathrm{samples}}$ \\
-\texttt{n\_features} & null & $[2,1000]$ & 共享 & 列数；null 则本 batch 抽一次，8 条共用；其它来源回退 20 \\
+\texttt{n\_features} & null & $[2,1000]$ & 共享 & 列数；null 则每个 batch 抽一次；其它来源回退 20 \\
 \texttt{seed} & 0 & --- & 共享 & 第 $e$ 集用 $\mathrm{seed}+e$ \\
-\texttt{batch\_size} & 8 & $[1,32]$ & 共享 & 一个 batch 的条数；同 batch 共用 $n,d,k$；$>32$ 截成 32 \\
-\texttt{n\_episodes} & $=$ batch\_size & $[1,32]$ & 共享 & \texttt{batch\_size} 的别名 \\
+\texttt{n\_episodes} & 8 & $[1,32]$ & 共享 & 不同生成世界的条数；可大于 batch\_size \\
+\texttt{batch\_size} & 8 & $[1,32]$ & 共享 & 一组同形状的条数；下一组重抽 $d,k$ \\
 \texttt{source} & discoscm & --- & 共享 & 生成器 canonical 名或别名 \\
 \texttt{source\_name} & null & --- & 别名 & 别名用的子名。canonical 已自带则忽略 \\
 \texttt{missing\_frac} & 画像 & $[0,0.95)$ & 共享 & \texttt{null} 则用该 source 画像 \\
@@ -111,7 +111,7 @@ HTTP/1.1，JSON，UTF-8。无鉴权。可复现性靠 \texttt{seed}。
 \texttt{return\_mechanism} & false & --- & 共享 & 是否附带生成说明块 \\
 \texttt{sigma} & 0.3 & $[0,10]$ & discoscm+scm & 噪声标准差 \\
 \texttt{debug} & false & --- & discoscm-only & 额外潜分数；其它来源忽略 \\
-\texttt{unit\_dim} & null & $[2,1024]$ & discoscm-only & $k$；null 则本 batch 抽一次，8 条共用 \\
+\texttt{unit\_dim} & null & $[2,1024]$ & discoscm-only & $k$；null 则每个 batch 抽一次 \\
 \texttt{type\_weights} & $70{:}5{:}10{:}5{:}5$ & $\ge 0$，和$>0$ & discoscm-only & 列类型权重（不必归一化） \\
 \texttt{independent\_frac} & 0.05 & $[0,1]$ & discoscm-only & 列与 $u$ 断开、改抽边缘的概率 \\
 \texttt{max\_parents} & null & $[1,512]$ & discoscm-only & null：典型上限 6 + 少量 hub；整数：全体硬上限 \\
@@ -128,12 +128,14 @@ HTTP/1.1，JSON，UTF-8。无鉴权。可复现性靠 \texttt{seed}。
 
 \begin{lstlisting}
 {
-  "batch_size": 8,
   "n_episodes": 8,
+  "batch_size": 8,
+  "n_batches": 1,
   "n_units": 16,
   "n_features": 8,
   "unit_dim": 4,
   "shape": [16, 8],
+  "batches": [{ "batch_index": 0, "shape": [16, 8], "episodes": ["..."] }],
   "episodes": [{
     "seed": 0,
     "table": {
