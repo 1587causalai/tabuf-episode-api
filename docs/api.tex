@@ -191,8 +191,7 @@ $Q\cap M$ 是缺失填补，$Q\setminus M$ 是普通预测。没有单独的 $y$
 
 \texttt{values} 从不因 mask 挖空。数值列是 float，离散列是 $\{0,\ldots,K_j-1\}$ 的 int。
 
-默认列类型比例（多项分布，按列抽）：数值 $0.40$，有序 $0.20$，多值类别 $0.25$，超多值类别 $0.15$。
-另外每列独立地以 $0.10$ 的概率与其它特征独立（不走 $\langle u_i,w_j\rangle$，只走自己的边际）。
+列类型按权重 $70{:}10{:}10{:}5$ 直接抽（数值 / 有序 / 多值类别 / 超多值；和为 $95$，归一化后多项抽样）。每列再以 $0.05$ 的概率与其它特征独立。生成：数值 $Y=\mathrm{scale}\langle u,w\rangle+\mathrm{shift}+e$；有序为 ordered probit；多值与超多值为 unit-specific multinomial logit（Gumbel 噪声），超多值类嵌入尺度更散、频率更偏。
 
 \begin{warnbox}
 训练只吃 \texttt{table}。真值用 \texttt{values} 在 \texttt{query\_mask} 处取值。

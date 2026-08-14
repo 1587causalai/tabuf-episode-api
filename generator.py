@@ -1,14 +1,12 @@
 """Observational v0 TabUF episode generator (DiscoSCM-aligned).
 
-Each response is n episodes; each episode samples its own population.
-The table is complete. missing_mask and query_mask are independent and may
-overlap: query ∩ missing is imputation, query without missing is ordinary prediction.
-No separate y_query. Column types are mixed by default.
+Column types are drawn i.i.d. with weights 70/10/10/5
+(numeric, ordinal, categorical, high_cardinality), then normalized.
+Each column is independently independent-of-rest with probability 0.05.
 """
 
 from __future__ import annotations
 
-from math import erf
 from typing import Any
 
 import numpy as np
@@ -17,10 +15,10 @@ DEFAULT_UNIT_DIM = 4
 DEFAULT_SIGMA = 0.3
 DEFAULT_QUERY_FRAC = 0.15
 DEFAULT_MISSING_FRAC = 0.05
-MECHANISM_LAW = "s[i,j] = <U[i], W[j]> + E[i,j]; Y[i,j] = g_j(s[i,j])"
 COL_TYPES = ("numeric", "ordinal", "categorical", "high_cardinality")
-COL_PROBS = np.array([0.40, 0.20, 0.25, 0.15])
-INDEP_P = 0.10
+COL_WEIGHTS = np.array([70.0, 10.0, 10.0, 5.0])
+COL_PROBS = COL_WEIGHTS / COL_WEIGHTS.sum()
+INDEP_P = 0.05
 
 
 def _json_bool_grid(arr: np.ndarray) -> list[list[bool]]:
@@ -31,13 +29,10 @@ def _json_float_grid(arr: np.ndarray) -> list[list[float]]:
     return [[float(v) for v in row] for row in arr]
 
 
-def _phi(s: np.ndarray) -> np.ndarray:
-    inv = 1.0 / np.sqrt(2.0)
-    s = np.asarray(s, dtype=np.float64)
-    out = np.empty_like(s)
-    for idx, v in enumerate(s.ravel()):
-        out.ravel()[idx] = 0.5 * (1.0 + erf(float(v) * inv))
-    return out
+def _softmax_rows(z: np.ndarray) -> np.ndarray:
+    z = z - z.max(axis=1, keepdims=True)
+    e = np.exp(np.clip(z, -40.0, 40.0))
+    return e / np.maximum(e.sum(axis=1, keepdims=True), 1e-12)
 
 
 def _n_classes_for(kind: str, n_units: int, rng: np.random.Generator) -> int | None:
@@ -52,45 +47,88 @@ def _n_classes_for(kind: str, n_units: int, rng: np.random.Generator) -> int | N
     return int(rng.integers(lo, hi + 1))
 
 
-def _bin_latent(s: np.ndarray, n_classes: int) -> np.ndarray:
-    codes = np.floor(_phi(s) * n_classes).astype(np.int64)
-    return np.clip(codes, 0, n_classes - 1)
-
-
 def _realize_column(
     rng: np.random.Generator,
     *,
     kind: str,
     independent: bool,
     n_classes: int | None,
-    s: np.ndarray,
+    U: np.ndarray,
+    sigma: float,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """Return length-n values and the column map stored in the response law."""
-    n = int(s.shape[0])
-    meta: dict[str, Any] = {"type": kind, "independent": bool(independent), "n_classes": n_classes}
+    """Unit-specific response for one feature.
+
+    numeric:    Y = scale * <u, w> + shift + e
+    ordinal:    ordered probit, cuts on <u, w> + e
+    categorical / high_cardinality: multinomial logit, Y ~ softmax(<u, C_c>)
+    independent: drop u, draw from a column-wise marginal of the same type.
+    """
+    n, k = int(U.shape[0]), int(U.shape[1])
+    meta: dict[str, Any] = {
+        "type": kind,
+        "independent": bool(independent),
+        "n_classes": n_classes,
+    }
+
     if kind == "numeric":
         if independent:
-            y = rng.standard_normal(n)
-            meta["marginal"] = "N(0,1)"
-        else:
-            y = s.astype(np.float64)
-            meta["g"] = "identity"
-        return y, meta
+            mu = float(rng.normal(0.0, 1.0))
+            sig = float(np.exp(rng.normal(-0.2, 0.4)))
+            y = rng.normal(mu, sig, size=n)
+            meta["g"] = "independent_gaussian"
+            meta["mu"] = mu
+            meta["sigma"] = sig
+            return y.astype(np.float64), meta
+        w = rng.standard_normal(k)
+        w = w / max(float(np.linalg.norm(w)), 1e-8)
+        scale = float(np.exp(rng.normal(0.0, 0.35)))
+        shift = float(rng.normal(0.0, 0.5))
+        e = rng.normal(0.0, float(sigma), size=n)
+        y = scale * (U @ w) + shift + e
+        meta["g"] = "affine_factor"
+        meta["w"] = [float(x) for x in w]
+        meta["scale"] = scale
+        meta["shift"] = shift
+        meta["sigma"] = float(sigma)
+        return y.astype(np.float64), meta
 
     assert n_classes is not None
+    L = int(n_classes)
+
     if independent:
-        y = rng.integers(0, n_classes, size=n)
-        meta["marginal"] = f"Unif{{0,...,{n_classes - 1}}}"
+        alpha = np.ones(L) * (0.4 if kind == "high_cardinality" else 0.9)
+        p = rng.dirichlet(alpha)
+        y = rng.choice(L, size=n, p=p)
+        meta["g"] = "independent_multinomial"
+        meta["probs"] = [float(x) for x in p]
         return y.astype(np.int64), meta
 
-    codes = _bin_latent(s, n_classes)
     if kind == "ordinal":
-        meta["g"] = "ordered_probit_bins"
-        return codes, meta
-    perm = rng.permutation(n_classes)
-    meta["g"] = "binned_then_label_perm"
-    meta["label_perm"] = [int(x) for x in perm]
-    return perm[codes], meta
+        w = rng.standard_normal(k)
+        w = w / max(float(np.linalg.norm(w)), 1e-8)
+        e = rng.normal(0.0, float(sigma), size=n)
+        s = U @ w + e
+        cuts = np.sort(rng.normal(0.0, 1.0, size=L - 1))
+        y = np.sum(s[:, None] > cuts[None, :], axis=1)
+        meta["g"] = "ordered_probit"
+        meta["w"] = [float(x) for x in w]
+        meta["thresholds"] = [float(x) for x in cuts]
+        meta["sigma"] = float(sigma)
+        return y.astype(np.int64), meta
+
+    # Unordered: class embeddings C (L x k). High-card scales are heterogeneous
+    # so a few classes dominate (Zipf-like), many stay rare.
+    C = rng.standard_normal((L, k))
+    if kind == "high_cardinality":
+        scales = np.exp(rng.normal(0.0, 0.9, size=L))
+        C = C * scales[:, None]
+        meta["class_scales"] = [float(x) for x in scales]
+    logits = U @ C.T
+    gumbel = rng.gumbel(size=(n, L))
+    y = np.argmax(logits + gumbel, axis=1)
+    meta["g"] = "multinomial_logit_gumbel"
+    meta["class_embeddings"] = _json_float_grid(C)
+    return y.astype(np.int64), meta
 
 
 def sample_episode(
@@ -113,13 +151,6 @@ def sample_episode(
     n_cells = n * d
 
     U = rng.standard_normal((n, k))
-    W = rng.standard_normal((d, k))
-    if column_normalize:
-        col_norm = np.linalg.norm(W, axis=0, keepdims=True)
-        W = W / np.maximum(col_norm, 1e-8)
-    E = rng.normal(0.0, float(sigma), size=(n, d))
-    S = U @ W.T + E
-
     kinds = rng.choice(COL_TYPES, size=d, p=COL_PROBS)
     independent = rng.random(d) < INDEP_P
     n_classes = [_n_classes_for(str(kinds[j]), n, rng) for j in range(d)]
@@ -132,7 +163,8 @@ def sample_episode(
             kind=str(kinds[j]),
             independent=bool(independent[j]),
             n_classes=n_classes[j],
-            s=S[:, j],
+            U=U,
+            sigma=sigma,
         )
         meta["j"] = j
         Y_cols.append(yj)
@@ -148,10 +180,8 @@ def sample_episode(
 
     missing_frac = float(np.clip(missing_frac, 0.0, 0.95))
     query_frac = float(np.clip(query_frac, 0.0, 0.95))
-    n_miss = int(round(missing_frac * n_cells))
-    n_query = int(round(query_frac * n_cells))
-    n_miss = max(0, min(n_miss, n_cells))
-    n_query = max(1, min(n_query, n_cells))
+    n_miss = max(0, min(int(round(missing_frac * n_cells)), n_cells))
+    n_query = max(1, min(int(round(query_frac * n_cells)), n_cells))
     missing_flat = np.zeros(n_cells, dtype=bool)
     query_flat = np.zeros(n_cells, dtype=bool)
     if n_miss:
@@ -189,26 +219,16 @@ def sample_episode(
             "representations": _json_float_grid(U),
         }
         payload["response_law"] = {
-            "form": "unit_specific_then_column_map",
-            "assignment": MECHANISM_LAW,
+            "form": "per_column_unit_specific",
+            "type_weights": {
+                "numeric": 70,
+                "ordinal": 10,
+                "categorical": 10,
+                "high_cardinality": 5,
+            },
             "column_independent_prob": INDEP_P,
-            "W": {
-                "role": "shared_feature_directions",
-                "column_normalize": bool(column_normalize),
-                "shape": [d, k],
-                "values": _json_float_grid(W),
-            },
-            "noise": {
-                "kind": "factual",
-                "sigma": float(sigma),
-                "independent_of_U": True,
-                "shape": [n, d],
-                "values": _json_float_grid(E),
-            },
             "columns": col_maps,
         }
-    if debug:
-        payload["S"] = _json_float_grid(S)
     return payload
 
 
