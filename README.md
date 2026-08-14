@@ -70,7 +70,7 @@ docker run --rm -p 8787:8787 tabuf-episode-api
 }
 ```
 
-`n_units` 默认 $1000$。`n_episodes` 默认 $8$（不同世界），`batch_size` 默认 $1$（每条自己抽 $d,k$；设 8 则组内同形状）。下面 curl 用 $16$ 行、$1$ 条只是为了拷贝轻量。
+`n_episodes` 是几个不同的生成世界（默认 8），不是 batch。`batch_size` 默认 1：每条自己抽列数 $d$ 和 $k$，不能直接 stack。只有写成 `"batch_size": 8` 时，这 8 张表才共用 `(n, d, k)`，可以堆成 `(8, n, d)`；它们仍然是 8 个世界（总体 / DAG / 列类型都重抽），只锁尺寸。`n_units` 默认 1000，不抽。细节见 [生成手册](docs/data-generation.pdf) 和 [API 文档里的三个例子](docs/api.pdf)。下面 curl 用 16 行、1 条只是为了拷贝轻量。
 
 返回每个 episode：`table.values`（完整表）、`table.missing_mask`、`table.query_mask`、`shapes`、`seed`。两张 mask 独立抽取，允许重合。
 

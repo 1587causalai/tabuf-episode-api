@@ -114,8 +114,8 @@
 表格基础模型的训练对象，常常被说成「一张表」。这对 \TabUF{} 不够用。
 网络真正要学的，是：\textbf{已经看见一部分格子之后，去填另一部分格子}。
 
-所以训练样本不是表，是 \textbf{episode}：一次生成 $n$ 条，
-每条是一张完整表，外加 missing 与 query 两张 mask。
+所以训练样本不是表，是 \textbf{episode}：一张完整表，外加 missing 与 query 两张 mask。
+一次请求可以要多条 episode，但一条 episode 仍然是\textbf{一个生成世界}，不是一个训练 batch。
 没有单独的 $y$。真值就在完整表的 query 格子上。
 
 为什么可以是格子级，而不是永远整列标签？
@@ -126,6 +126,61 @@
 \begin{lockbox}
 训练样本是 episode：完整表 + missing + query。
 不是整张裸表，也不是一个 DAG。网络不准看见 $u_i$。
+\end{lockbox}
+
+
+\section{episode 不是 batch：两个旋钮不要混}
+
+这两个词最容易被当成一回事。它们不是。
+
+\paragraph{episode 是世界。}
+一条 episode 是一次独立的数据生成：自己的总体 $U$、自己的特征 token DAG、自己的列类型、自己的格子、自己的 mask。
+第 $e$ 条用 $\mathrm{seed}+e$。
+\texttt{n\_episodes} 问的是：这次要几个这样的世界。默认 $8$。
+
+\paragraph{batch 是堆叠。}
+训练一步常常需要把好几张表叠成 $(\texttt{batch\_size}, n, d)$。
+GPU 做不到「第一张 $20$ 列、第二张 $200$ 列」直接 \texttt{stack}。
+所以 \texttt{batch\_size} 是打包约束：\textbf{同一组里} $n$、$d$、$k$ 锁成一样；
+下一组才重新抽 $d$、$k$（当请求里它们是 \texttt{null} 时）。
+\texttt{n\_units} 始终是请求参数，不抽。
+
+\paragraph{默认为什么是 $1$。}
+默认 \texttt{batch\_size}=1，意思是每条 episode 单独成组，于是每条自己抽 $d$、$k$。
+这才跟「不同的 episode 是不同的世界」一致。
+只有当你明确要一步吃 $8$ 张同形状表时，才把 \texttt{batch\_size} 写成 $8$。
+那时 $8$ 条仍然是 $8$ 个不同世界（$U$、DAG、列类型都重抽），只是张量尺寸相同。
+
+\paragraph{一次调用里什么会重抽。}
+\begin{center}
+\begin{tabular}{@{}llp{8.6cm}@{}}
+\toprule
+量 & 何时重抽 & 说明 \\
+\midrule
+$n$（\texttt{n\_units}） & 不抽 & 请求旋钮，整个调用共用 \\
+$d$、$k$ & 每个 \texttt{batch} 一次 & \texttt{null} 才抽；组内共用，下一组再抽 \\
+总体 $U$、DAG、$\mathbf{t}_j$、列类型、格子、mask & 每条 episode 一次 & 这才是「不同的世界」 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+三个容易错的读法：
+\begin{itemize}
+  \item \texttt{n\_episodes} \textbf{不是} \texttt{batch\_size} 的别名。
+  \item \texttt{batch\_size}=8 不是「复制同一张表 8 份」，是 8 个世界、同一套 $(n,d,k)$。
+  \item 写死 \texttt{n\_features} 以后，所有组的 $d$ 都不再抽，只剩 $k$ 还按组抽（若 \texttt{unit\_dim} 仍是 \texttt{null}）。
+\end{itemize}
+
+例子（调用合同见 \texttt{docs/api.pdf}）：
+\texttt{n\_episodes}=16、\texttt{batch\_size}=8
+$\to$ 两组。组内 8 张表可 \texttt{stack} 成 $(8,n,d)$；两组的 $d$、$k$ 一般不同。
+默认 \texttt{n\_episodes}=8、\texttt{batch\_size}=1
+$\to$ 8 组、8 套形状，不能直接叠。
+
+\begin{lockbox}
+\texttt{n\_episodes}：几个世界。
+\texttt{batch\_size}：几个世界共用一套 $(n,d,k)$，好叠成张量。
+默认每条世界自己一套形状。
 \end{lockbox}
 
 \section{来源是通道，不是 DiscoSCM 的方言}

@@ -61,7 +61,7 @@
 
 给要正确调用本服务的 Agent 或程序。不是生成手册。
 
-\texttt{POST /v0/episodes} 返回 $n_{\mathrm{episodes}}$ 条不同 episode（默认 8），按 \texttt{batch\_size}（默认 1）打包；每条自己抽 $d,k$。要同形状堆叠时把 \texttt{batch\_size} 设成 8。
+\texttt{POST /v0/episodes} 返回 $n_{\mathrm{episodes}}$ 条不同世界（默认 8）。\texttt{batch\_size} 默认 1：每条自己抽 $d,k$，一般不能直接 stack。要 $(8,n,d)$ 必须显式 \texttt{batch\_size}=8。详见第~\ref{sec:batch} 节。
 每条含 \texttt{values}、\texttt{missing\_mask}、\texttt{query\_mask}。
 没有额外的 $y$。只拿 \texttt{table} 训练。
 
@@ -121,6 +121,57 @@ HTTP/1.1，JSON，UTF-8。无鉴权。可复现性靠 \texttt{seed}。
 \end{center}
 }
 \texttt{type\_weights} 五键：\texttt{numeric}/\texttt{ordinal}/\texttt{binary}/\texttt{categorical}/\texttt{high\_cardinality}。
+
+
+\section{\texttt{n\_episodes} 不是 \texttt{batch\_size}}
+\label{sec:batch}
+
+这两个字段最容易混。混了以后，默认调用会抽出 8 张\textbf{列数不同}的表，却被当成可以 \texttt{stack} 的一个 batch。
+
+\begin{itemize}
+  \item \texttt{n\_episodes}（默认 8）：要几个\textbf{不同的生成世界}。每条有自己的总体、DAG、列类型、格子、mask。第 $e$ 条用 $\mathrm{seed}+e$。
+  \item \texttt{batch\_size}（默认 1）：几个世界共用一套 $(n,d,k)$，好叠成 $(\texttt{batch\_size}, n, d)$。下一组才重抽 $d$、$k$（当它们在请求里是 \texttt{null}）。
+  \item \texttt{n\_units} 不抽，整个调用共用。
+\end{itemize}
+
+默认 \texttt{batch\_size}=1：每条 episode 单独成组，于是每条自己抽 $d$、$k$。
+这是故意的。只有要一步吃同形状张量时，才把 \texttt{batch\_size} 写成 8。
+那时仍是 8 个不同世界，只是尺寸相同。
+
+响应里 \texttt{batches} 按组切开；\texttt{episodes} 是平铺。
+\texttt{n\_batches}>1 时，顶层不给单个 \texttt{n\_features} / \texttt{shape}（组间不同，给了会误导）。
+只有一组时，顶层会重复该组的 \texttt{shape}，图省事。
+
+\subsection{三个例子}
+
+\paragraph{例 A（默认）。}
+\begin{lstlisting}
+{"n_units": 16, "seed": 0, "n_episodes": 8, "batch_size": 1}
+\end{lstlisting}
+一次返回 \texttt{n\_batches}=8。某一发的形状可以是
+$[16,5]$、$[16,43]$、$[16,12]$、$\ldots$（$d$、$k$ 每条都重抽）。
+\textbf{不能} \texttt{stack} 成 $(8,16,d)$。
+这就是省略 \texttt{batch\_size} 时的行为。
+
+\paragraph{例 B（一步训练）。}
+\begin{lstlisting}
+{"n_units": 16, "seed": 0, "n_episodes": 8, "batch_size": 8}
+\end{lstlisting}
+\texttt{n\_batches}=1，例如 \texttt{shape}=$[16,19]$、\texttt{unit\_dim}=17。
+8 张 \texttt{values} 可以堆成 $(8,16,19)$。
+内容仍不同：8 套 $U$ / DAG / 列类型。只锁尺寸。
+
+\paragraph{例 C（两步）。}
+\begin{lstlisting}
+{"n_units": 16, "seed": 0, "n_episodes": 16, "batch_size": 8}
+\end{lstlisting}
+\texttt{n\_batches}=2。某一发：
+组 0 形状 $[16,5]$、$k=32$；组 1 形状 $[16,43]$、$k=26$。
+组内可叠，组间换形状。
+\texttt{batches[0].episodes} 是前 8 条，\texttt{episodes} 仍是平铺的 16 条。
+
+写死 \texttt{"n\_features": 20} 则所有组的 $d$ 都是 20，不再抽列数。
+\texttt{unit\_dim} 同理。
 
 \section{响应形状}
 
@@ -268,6 +319,8 @@ curl -s -X POST http://127.0.0.1:8787/v0/episodes \
   \item 不要把 \texttt{population} / \texttt{response\_law} / \texttt{mechanism} 喂进网络。只训 \texttt{table}。
   \item 不要期望 \texttt{y\_query} / \texttt{y\_input} / \texttt{context\_mask}。真值在 \texttt{values} 的 query 格。
   \item 不要把 \texttt{n\_units} 一律当成 unit。只有 \texttt{source=discoscm} 把行解释成 unit；其它来源它是行数 / $n_{\mathrm{samples}}$。
+  \item 不要把 \texttt{n\_episodes} 当成 \texttt{batch\_size} 的别名。默认 \texttt{batch\_size}=1，8 条表的列数可以全不同；要叠张量必须显式写 \texttt{batch\_size}。
+  \item 不要把 \texttt{batch\_size}=8 理解成「同一张表复制 8 份」。那是 8 个世界、同一套 $(n,d,k)$。
 \end{itemize}
 
 \appendix
