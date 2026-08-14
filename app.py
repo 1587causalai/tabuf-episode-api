@@ -14,8 +14,7 @@ VERSION = "v0"
 DESCRIPTION = """
 一次返回 n 条 episode，每条自己抽一个总体。
 
-列类型权重 `type_weights` 和独立列概率 `independent_frac` 可传入；
-默认 70/5/10/5/5（数值/有序/二值/多值/超多值）与 0.05。权重不必归一化。
+默认 source=discoscm。也可 sklearn_synthetic / sklearn_real / scm；openml 与 recsys 已占位。
 """
 
 app = FastAPI(
@@ -55,6 +54,15 @@ class EpisodeRequest(BaseModel):
     n_episodes: int = Field(default=1, ge=1)
     type_weights: TypeWeights = Field(default_factory=TypeWeights, description="列类型抽样权重，不必归一化")
     independent_frac: float = Field(default=0.05, ge=0.0, le=1.0, description="每列与其它特征独立的概率")
+    source: str = Field(
+        default="discoscm",
+        description="discoscm | sklearn_synthetic | sklearn_real | scm | openml | recsys",
+        examples=["discoscm"],
+    )
+    source_name: str | None = Field(
+        default=None,
+        description="子名称：make_classification / iris / OpenML id 等。缺省则该 source 内随机抽。",
+    )
     return_mechanism: bool = Field(default=False)
     debug: bool = Field(default=False)
 
@@ -123,7 +131,11 @@ def create_episodes(req: EpisodeRequest) -> dict[str, Any]:
             return_mechanism=req.return_mechanism,
             type_weights=req.type_weights.model_dump(),
             independent_frac=req.independent_frac,
+            source=req.source,
+            source_name=req.source_name,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
     return {"n_episodes": len(episodes), "episodes": episodes}

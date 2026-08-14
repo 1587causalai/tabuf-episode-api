@@ -158,6 +158,8 @@ URL 里的 \texttt{/v0} 是生成语义版本，不是 HTTP 框架版本。
 \texttt{n\_episodes} & int & 1 & $[1,32]$ & 条数；各抽各的总体 \\
 \texttt{type\_weights} & 对象 & 见下 & $\ge 0$ & 列类型抽样权重，不必归一化 \\
 \texttt{independent\_frac} & float & 0.05 & $[0,1]$ & 每列与其它特征独立的概率 \\
+\texttt{source} & string & discoscm & --- & 见下方来源表 \\
+\texttt{source\_name} & string/null & null & --- & 子名称，如 iris、make\_classification \\
 \texttt{return\_mechanism} & bool & false & --- & 是否带总体和响应律 \\
 \texttt{debug} & bool & false & --- & 额外潜分数 $S$ \\
 \bottomrule
@@ -228,7 +230,30 @@ $Q\cap M$ 是缺失填补，$Q\setminus M$ 是普通预测。没有单独的 $y$
 \texttt{population.representations} 就是个体真名。检查生成器用，不要进训练。
 \end{warnbox}
 
+
+\subsection{数据来源 \texttt{source}}
+
+默认 \texttt{discoscm} 仍是 unit-specific law。其它来源编进同一套完整表 + missing/query。
+
+\begin{center}
+\begin{tabular}{@{}llp{6.4cm}@{}}
+\toprule
+\texttt{source} & 状态 & 含义 \\
+\midrule
+\texttt{discoscm} & 默认 & 先抽总体，再 unit-specific $g_j(u_i)$ \\
+\texttt{sklearn\_synthetic} & 可用 & \texttt{make\_classification/regression/friedman1/low\_rank} \\
+\texttt{sklearn\_real} & 可用 & iris / wine / breast\_cancer / diabetes \\
+\texttt{scm} & 可用 & 论文风格 ANM：特征上的随机 DAG，行 i.i.d. \\
+\texttt{openml} & 占位 & OpenML 分类/回归，尚未接缓存 \\
+\texttt{recsys} & 占位 & 真实推荐表（MovieLens 等），尚未接缓存 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\texttt{scm} / sklearn 的行不是 DiscoSCM unit。机制打开时会写明这一点。
+
 \subsection{错误}
+
 
 
 \begin{center}

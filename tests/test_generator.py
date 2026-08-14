@@ -69,3 +69,27 @@ def test_type_weights_override_all_numeric():
         independent_frac=0.0,
     )[0]
     assert set(ep["table"]["column_types"]) == {"numeric"}
+
+
+def test_sklearn_synthetic_compiles_to_table():
+    ep = sample_episodes(
+        n_units=20, n_features=6, n_episodes=1, seed=0,
+        source="sklearn_synthetic", source_name="make_regression",
+    )[0]
+    assert ep["table"]["n_units"] == 20
+    assert "query_mask" in ep["table"]
+
+def test_scm_has_edges_when_mechanism_on():
+    ep = sample_episodes(
+        n_units=16, n_features=6, n_episodes=1, seed=1,
+        source="scm", return_mechanism=True,
+    )[0]
+    assert ep["response_law"]["framework"] == "ANM-SCM"
+    assert "edges" in ep["response_law"]
+
+def test_sklearn_real_iris():
+    ep = sample_episodes(
+        n_units=30, n_features=4, n_episodes=1, seed=0,
+        source="sklearn_real", source_name="iris",
+    )[0]
+    assert ep["table"]["n_features"] == 4

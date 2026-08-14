@@ -283,6 +283,8 @@ def sample_episodes(
     column_normalize: bool = True,
     type_weights: dict[str, float] | None = None,
     independent_frac: float = DEFAULT_INDEP_FRAC,
+    source: str = "discoscm",
+    source_name: str | None = None,
 ) -> list[dict[str, Any]]:
     n_episodes = max(1, min(int(n_episodes), 32))
     if seed is None:
@@ -293,8 +295,9 @@ def sample_episodes(
     for e in range(n_episodes):
         ep_seed = base + e
         rng = np.random.default_rng(ep_seed)
-        episodes.append(
-            sample_episode(
+        src = (source or "discoscm").lower()
+        if src == "discoscm":
+            ep = sample_episode(
                 rng,
                 n_units=n_units,
                 n_features=n_features,
@@ -309,5 +312,27 @@ def sample_episodes(
                 type_weights=type_weights,
                 independent_frac=independent_frac,
             )
-        )
+        else:
+            from sources import sklearn_synthetic, sklearn_real, scm_anm, openml_table, recsys_table
+            kw = dict(
+                rng=rng, n_units=n_units, n_features=n_features,
+                missing_frac=missing_frac, query_frac=query_frac,
+                seed=ep_seed, return_mechanism=return_mechanism,
+            )
+            if src == "sklearn_synthetic":
+                ep = sklearn_synthetic(source_name=source_name, **kw)
+            elif src == "sklearn_real":
+                ep = sklearn_real(source_name=source_name, **kw)
+            elif src == "scm":
+                ep = scm_anm(sigma=sigma, **kw)
+            elif src == "openml":
+                ep = openml_table(source_name=source_name, **kw)
+            elif src == "recsys":
+                ep = recsys_table(source_name=source_name, **kw)
+            else:
+                raise ValueError(
+                    "unknown source %r; use discoscm, sklearn_synthetic, sklearn_real, scm, openml, recsys"
+                    % src
+                )
+        episodes.append(ep)
     return episodes
