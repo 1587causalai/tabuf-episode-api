@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI
-from pydantic import BaseModel, Field, field_validator
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from generator import sample_episodes
 
@@ -14,9 +14,8 @@ VERSION = "v0"
 DESCRIPTION = """
 一次返回 n 条 episode，每条自己抽一个总体。
 
-表 `values` 是完整格子。`missing_mask` 与 `query_mask` **可以重合**：
-重合处是缺失填补，query 其余是普通预测。没有单独的 y 标签。
-列类型按 70/10/10/5 直接抽（数值/有序/多值/超多值），每列 5% 独立于其它特征。
+列类型权重 `type_weights` 和独立列概率 `independent_frac` 可传入；
+默认 70/5/10/5/5（数值/有序/二值/多值/超多值）与 0.05。权重不必归一化。
 """
 
 app = FastAPI(
@@ -31,17 +30,33 @@ app = FastAPI(
 )
 
 
+class TypeWeights(BaseModel):
+    numeric: float = Field(default=70, ge=0, description="数值列权重")
+    ordinal: float = Field(default=5, ge=0, description="有序列权重")
+    binary: float = Field(default=10, ge=0, description="二值类别权重")
+    categorical: float = Field(default=5, ge=0, description="多值类别权重")
+    high_cardinality: float = Field(default=5, ge=0, description="超多值类别权重")
+
+    @model_validator(mode="after")
+    def positive_sum(self) -> "TypeWeights":
+        if self.numeric + self.ordinal + self.binary + self.categorical + self.high_cardinality <= 0:
+            raise ValueError("type_weights 之和必须为正，将按此比例抽样")
+        return self
+
+
 class EpisodeRequest(BaseModel):
     n_units: int = Field(default=64, ge=8, le=512, examples=[16])
     n_features: int = Field(default=8, ge=2, le=64, examples=[8])
     unit_dim: int = Field(default=4, ge=1, le=32, examples=[4])
-    query_frac: float = Field(default=0.15, gt=0.0, lt=1.0, description="要预测的格子占全表比例，与 missing 独立可重合")
-    missing_frac: float = Field(default=0.05, ge=0.0, lt=0.95, description="世界缺失占全表比例，与 query 独立可重合")
+    query_frac: float = Field(default=0.15, gt=0.0, lt=1.0)
+    missing_frac: float = Field(default=0.05, ge=0.0, lt=0.95)
     sigma: float = Field(default=0.3, ge=0.0, le=10.0)
     seed: int | None = Field(default=0)
-    n_episodes: int = Field(default=1, ge=1, description="条数；每条各自抽总体，硬顶 32")
-    return_mechanism: bool = Field(default=False, description="true 才带 population 与 response_law")
-    debug: bool = Field(default=False, description="额外潜变量分数 S；隐含 return_mechanism")
+    n_episodes: int = Field(default=1, ge=1)
+    type_weights: TypeWeights = Field(default_factory=TypeWeights, description="列类型抽样权重，不必归一化")
+    independent_frac: float = Field(default=0.05, ge=0.0, le=1.0, description="每列与其它特征独立的概率")
+    return_mechanism: bool = Field(default=False)
+    debug: bool = Field(default=False)
 
     @field_validator("n_episodes")
     @classmethod
@@ -61,11 +76,11 @@ class TableShapes(BaseModel):
 class Table(BaseModel):
     n_units: int
     n_features: int
-    values: list[list[float | int]] = Field(description="完整表。数值为 float，离散为 int 编码。不因 mask 挖空。")
+    values: list[list[float | int]]
     missing_mask: list[list[bool]]
     query_mask: list[list[bool]]
-    column_types: list[str] = Field(description="numeric | ordinal | categorical | high_cardinality")
-    n_classes: list[int | None] = Field(description="离散列的水平数；数值列为 null")
+    column_types: list[str] = Field(description="numeric | ordinal | binary | categorical | high_cardinality")
+    n_classes: list[int | None]
     shapes: TableShapes
 
 
@@ -94,16 +109,21 @@ def health() -> dict[str, Any]:
 
 @app.post("/v0/episodes", response_model=EpisodeResponse, response_model_exclude_none=True, tags=["episodes"], summary="抽取 n 条观测 episode")
 def create_episodes(req: EpisodeRequest) -> dict[str, Any]:
-    episodes = sample_episodes(
-        n_units=req.n_units,
-        n_features=req.n_features,
-        unit_dim=req.unit_dim,
-        query_frac=req.query_frac,
-        missing_frac=req.missing_frac,
-        sigma=req.sigma,
-        seed=req.seed,
-        n_episodes=req.n_episodes,
-        debug=req.debug,
-        return_mechanism=req.return_mechanism,
-    )
+    try:
+        episodes = sample_episodes(
+            n_units=req.n_units,
+            n_features=req.n_features,
+            unit_dim=req.unit_dim,
+            query_frac=req.query_frac,
+            missing_frac=req.missing_frac,
+            sigma=req.sigma,
+            seed=req.seed,
+            n_episodes=req.n_episodes,
+            debug=req.debug,
+            return_mechanism=req.return_mechanism,
+            type_weights=req.type_weights.model_dump(),
+            independent_frac=req.independent_frac,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"n_episodes": len(episodes), "episodes": episodes}

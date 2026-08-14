@@ -1,7 +1,7 @@
 """Observational v0 TabUF episode generator (DiscoSCM-aligned).
 
-Column types are drawn i.i.d. with weights 70/10/10/5
-(numeric, ordinal, categorical, high_cardinality), then normalized.
+Column types are drawn i.i.d. with weights 70/5/10/5/5
+(numeric, ordinal, binary, categorical, high_cardinality), then normalized.
 Each column is independently independent-of-rest with probability 0.05.
 """
 
@@ -15,10 +15,25 @@ DEFAULT_UNIT_DIM = 4
 DEFAULT_SIGMA = 0.3
 DEFAULT_QUERY_FRAC = 0.15
 DEFAULT_MISSING_FRAC = 0.05
-COL_TYPES = ("numeric", "ordinal", "categorical", "high_cardinality")
-COL_WEIGHTS = np.array([70.0, 10.0, 10.0, 5.0])
-COL_PROBS = COL_WEIGHTS / COL_WEIGHTS.sum()
-INDEP_P = 0.05
+COL_TYPES = ("numeric", "ordinal", "binary", "categorical", "high_cardinality")
+DEFAULT_TYPE_WEIGHTS = {
+    "numeric": 70.0,
+    "ordinal": 5.0,
+    "binary": 10.0,
+    "categorical": 5.0,
+    "high_cardinality": 5.0,
+}
+DEFAULT_INDEP_FRAC = 0.05
+
+
+def _type_probs(weights: dict[str, float] | None) -> np.ndarray:
+    src = DEFAULT_TYPE_WEIGHTS if weights is None else weights
+    w = np.array([float(src.get(k, 0.0)) for k in COL_TYPES], dtype=np.float64)
+    w = np.maximum(w, 0.0)
+    s = float(w.sum())
+    if s <= 0:
+        raise ValueError("type_weights must sum to a positive number")
+    return w / s
 
 
 def _json_bool_grid(arr: np.ndarray) -> list[list[bool]]:
@@ -38,6 +53,8 @@ def _softmax_rows(z: np.ndarray) -> np.ndarray:
 def _n_classes_for(kind: str, n_units: int, rng: np.random.Generator) -> int | None:
     if kind == "numeric":
         return None
+    if kind == "binary":
+        return 2
     if kind == "ordinal":
         return int(rng.integers(3, 9))
     if kind == "categorical":
@@ -92,6 +109,22 @@ def _realize_column(
         meta["sigma"] = float(sigma)
         return y.astype(np.float64), meta
 
+    if kind == "binary":
+        if independent:
+            p = float(rng.uniform(0.1, 0.9))
+            y = rng.binomial(1, p, size=n)
+            meta["g"] = "independent_bernoulli"
+            meta["p"] = p
+            return y.astype(np.int64), meta
+        w = rng.standard_normal(k)
+        w = w / max(float(np.linalg.norm(w)), 1e-8)
+        e = rng.normal(0.0, float(sigma), size=n)
+        y = (U @ w + e > 0.0).astype(np.int64)
+        meta["g"] = "latent_threshold"
+        meta["w"] = [float(x) for x in w]
+        meta["sigma"] = float(sigma)
+        return y, meta
+
     assert n_classes is not None
     L = int(n_classes)
 
@@ -144,15 +177,23 @@ def sample_episode(
     debug: bool = False,
     return_mechanism: bool = False,
     seed: int | None = 0,
+    type_weights: dict[str, float] | None = None,
+    independent_frac: float = DEFAULT_INDEP_FRAC,
 ) -> dict[str, Any]:
     n = int(n_units)
     d = int(n_features)
     k = int(unit_dim)
     n_cells = n * d
+    probs = _type_probs(type_weights)
+    indep_p = float(np.clip(independent_frac, 0.0, 1.0))
+    used_weights = {
+        k: float((type_weights or DEFAULT_TYPE_WEIGHTS).get(k, DEFAULT_TYPE_WEIGHTS[k]))
+        for k in COL_TYPES
+    }
 
     U = rng.standard_normal((n, k))
-    kinds = rng.choice(COL_TYPES, size=d, p=COL_PROBS)
-    independent = rng.random(d) < INDEP_P
+    kinds = rng.choice(COL_TYPES, size=d, p=probs)
+    independent = rng.random(d) < indep_p
     n_classes = [_n_classes_for(str(kinds[j]), n, rng) for j in range(d)]
 
     Y_cols: list[np.ndarray] = []
@@ -220,13 +261,8 @@ def sample_episode(
         }
         payload["response_law"] = {
             "form": "per_column_unit_specific",
-            "type_weights": {
-                "numeric": 70,
-                "ordinal": 10,
-                "categorical": 10,
-                "high_cardinality": 5,
-            },
-            "column_independent_prob": INDEP_P,
+            "type_weights": used_weights,
+            "column_independent_prob": indep_p,
             "columns": col_maps,
         }
     return payload
@@ -245,6 +281,8 @@ def sample_episodes(
     debug: bool = False,
     return_mechanism: bool = False,
     column_normalize: bool = True,
+    type_weights: dict[str, float] | None = None,
+    independent_frac: float = DEFAULT_INDEP_FRAC,
 ) -> list[dict[str, Any]]:
     n_episodes = max(1, min(int(n_episodes), 32))
     if seed is None:
@@ -268,6 +306,8 @@ def sample_episodes(
                 debug=debug,
                 return_mechanism=return_mechanism,
                 seed=ep_seed,
+                type_weights=type_weights,
+                independent_frac=independent_frac,
             )
         )
     return episodes

@@ -38,7 +38,7 @@ def test_column_type_mix_and_independent_in_law():
         n_units=32, n_features=20, n_episodes=1, seed=7, return_mechanism=True
     )[0]
     types = set(ep["table"]["column_types"])
-    assert types <= {"numeric", "ordinal", "categorical", "high_cardinality"}
+    assert types <= {"numeric", "ordinal", "binary", "categorical", "high_cardinality"}
     assert "numeric" in types
     cols = ep["response_law"]["columns"]
     assert any(c["independent"] for c in cols) or True  # 10% may miss on unlucky seed
@@ -60,3 +60,12 @@ def test_defaults_fracs():
     nq = ep["table"]["shapes"]["n_query"]
     assert nm == round(0.05 * n_cells)
     assert nq == round(0.15 * n_cells)
+
+
+def test_type_weights_override_all_numeric():
+    ep = sample_episodes(
+        n_units=12, n_features=8, n_episodes=1, seed=0,
+        type_weights={"numeric": 1, "ordinal": 0, "binary": 0, "categorical": 0, "high_cardinality": 0},
+        independent_frac=0.0,
+    )[0]
+    assert set(ep["table"]["column_types"]) == {"numeric"}
