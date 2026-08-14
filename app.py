@@ -19,7 +19,7 @@ DESCRIPTION = """
 观测第零版 episode 数据服务。
 
 生成律：`Y[i,j] = <U[i], W[j]> + E[i,j]`。先抽总体再填格子，再切 C/Q。
-训练默认 **不返回** 潜变量 `U` / `W`。语义以仓库 `docs/data-generation.pdf` 为准；
+训练默认 **不返回** 背后的 DiscoSCM。需要时设 `return_mechanism: true`，按 `<U, E, V, F>` 整份给出。语义以 `docs/data-generation.pdf` 为准；
 本服务的字段名是那份文档的临时投影，会跟着文档改。
 """
 
@@ -71,9 +71,14 @@ class EpisodeRequest(BaseModel):
         description="一次返回多少集。服务端硬顶 32。",
         examples=[1],
     )
+    return_mechanism: bool = Field(
+        default=False,
+        description="true 时每集附带 DiscoSCM 元组 <U,E,V,F>（含 U、E、结构方程和 W）。训练路径必须 false。",
+        examples=[False],
+    )
     debug: bool = Field(
         default=False,
-        description="true 时附带 U、W、Y_full。训练路径必须 false。",
+        description="true 时额外附带顶层 U、W、Y_full，并隐含 return_mechanism=true。训练路径必须 false。",
         examples=[False],
     )
 
@@ -93,6 +98,7 @@ class EpisodeRequest(BaseModel):
                     "sigma": 0.3,
                     "seed": 0,
                     "n_episodes": 1,
+                    "return_mechanism": False,
                     "debug": False,
                 }
             ]
@@ -121,9 +127,13 @@ class Episode(BaseModel):
     y_query: list[float] = Field(description="Q 上的真值，按行优先拉直，长度 = n_query")
     shapes: Shapes
     seed: int
-    U: list[list[float]] | None = Field(default=None, description="仅 debug=true")
-    W: list[list[float]] | None = Field(default=None, description="仅 debug=true")
-    Y_full: list[list[float]] | None = Field(default=None, description="仅 debug=true")
+    mechanism: dict[str, Any] | None = Field(
+        default=None,
+        description="DiscoSCM 元组。仅 return_mechanism=true（或 debug=true）时出现",
+    )
+    U: list[list[float]] | None = Field(default=None, description="仅 debug=true，兼容字段；正式通道是 mechanism.U")
+    W: list[list[float]] | None = Field(default=None, description="仅 debug=true，兼容字段；正式通道是 mechanism.F.W")
+    Y_full: list[list[float]] | None = Field(default=None, description="仅 debug=true 的满表世界，不是机制本身")
 
 
 class EpisodeResponse(BaseModel):
@@ -151,7 +161,7 @@ def health() -> dict[str, Any]:
 def create_episodes(req: EpisodeRequest) -> dict[str, Any]:
     """按 DiscoSCM 第零版因子律生成 Unit×Feature episode。
 
-    调用方拿到的是挖空后的表和查询真值，不是 DAG，也不是 u_i。
+    默认只给挖空后的表和查询真值。设 return_mechanism=true 才返回该集背后的 DiscoSCM。
     """
     episodes = sample_episodes(
         n_units=req.n_units,
@@ -162,5 +172,6 @@ def create_episodes(req: EpisodeRequest) -> dict[str, Any]:
         seed=req.seed,
         n_episodes=req.n_episodes,
         debug=req.debug,
+        return_mechanism=req.return_mechanism,
     )
     return {"episodes": episodes}

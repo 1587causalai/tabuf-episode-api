@@ -155,7 +155,8 @@ $Y_{ij}=\langle\mathbf{u}_i,\mathbf{w}_j\rangle+e_{ij}$，再切 $C/Q$。
 \texttt{sigma} & float & 0.3 & $[0,10]$ & 观测噪声标准差 \\
 \texttt{seed} & int/null & 0 & --- & 基种子；第 $e$ 集用 $\mathrm{seed}+e$ \\
 \texttt{n\_episodes} & int & 1 & $[1,32]$ & 一次返回多少集（硬顶 32） \\
-\texttt{debug} & bool & false & --- & 是否附带 $U,W,Y_{\mathrm{full}}$ \\
+\texttt{return\_mechanism} & bool & false & --- & 是否返回该集 DiscoSCM \\
+\texttt{debug} & bool & false & --- & 额外满表 $Y_{\mathrm{full}}$；隐含上一开关 \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -222,7 +223,39 @@ $Y_{ij}=\langle\mathbf{u}_i,\mathbf{w}_j\rangle+e_{ij}$，再切 $C/Q$。
 $u_i$ 是个体真名。漏出去，预训练就是漏题。
 \end{warnbox}
 
+\subsection{\texttt{return\_mechanism}：每集背后的 DiscoSCM}
+
+默认\textbf{不}返回生成机制。训练路径必须保持关闭。
+打开后，每个 episode 多一个 \texttt{mechanism} 对象，按 DiscoSCM 元组 $\langle U,\mathbf{E},\mathbf{V},\mathcal{F}\rangle$ 给出这一集的世界是怎么来的。
+
+\begin{lstlisting}
+"mechanism": {
+  "framework": "DiscoSCM",
+  "version": "v0",
+  "observational": true,
+  "U":  {"role": "unit_selection", "prior": "N(0, I)", "shape": [n, k], "values": ...},
+  "E":  {"role": "factual_noise", "sigma": 0.3, "independent_of_U": true, "values": ...},
+  "V":  ["Y"],
+  "F":  {
+    "form": "unit_specific_factor",
+    "assignment": "Y[i,j] = <U[i], W[j]> + E[i,j]",
+    "column_normalize": true,
+    "W": {"role": "shared_feature_directions", "values": ...}
+  }
+}
+\end{lstlisting}
+
+$U$ 是 unit selection，不是 SCM 的外生噪声。第零版 $\mathbf{E}$ 是一次观测噪声，不重抽 $\mathbf{E}(\mathbf{x})$。
+用 $U,W,E$ 可以还原满表 $Y=UW^{\top}+E$，因此机制通道\textbf{不}再附带 $Y_{\mathrm{full}}$。
+\texttt{debug=true} 才会额外给出顶层 $U,W,Y_{\mathrm{full}}$（兼容旧字段），并隐含 \texttt{return\_mechanism=true}。
+
+\begin{warnbox}
+\texttt{return\_mechanism} 与 \texttt{debug} 都是漏题开关。DataLoader 必须保持 false。
+需要机制的场景：检查生成器、写识别实验、对拍 Compiler。不要把 \texttt{mechanism} 喂进网络。
+\end{warnbox}
+
 \subsection{错误}
+
 
 \begin{center}
 \begin{tabular}{@{}clp{8cm}@{}}

@@ -20,7 +20,8 @@ set of n realized units {u_0, ..., u_{n-1}} that share feature directions W.
 No natural missingness. Query set Q is a random subset of cells (~query_frac);
 context C is the complement. C ∩ Q = empty, C ∪ Q = all cells.
 
-The model must not receive U or W unless debug=True.
+The model must not receive the DiscoSCM mechanism unless return_mechanism=True.
+Training payloads omit it. debug=True also attaches Y_full.
 """
 
 from __future__ import annotations
@@ -46,6 +47,57 @@ def _json_bool_grid(arr: np.ndarray) -> list[list[bool]]:
     return arr.astype(bool).tolist()
 
 
+MECHANISM_LAW = "Y[i,j] = <U[i], W[j]> + E[i,j]"
+
+
+def pack_mechanism(
+    *,
+    U: np.ndarray,
+    W: np.ndarray,
+    E: np.ndarray,
+    sigma: float,
+    column_normalize: bool,
+) -> dict[str, Any]:
+    """Serialize the DiscoSCM tuple <U, E, V, F> behind one observational episode."""
+    n, k = (int(U.shape[0]), int(U.shape[1]))
+    d = int(W.shape[0])
+    return {
+        "framework": "DiscoSCM",
+        "version": "v0",
+        "observational": True,
+        "note": (
+            "Tuple <U, E, V, F>. U is unit selection (a realized population), "
+            "not SCM exogenous noise. E is factual noise; v0 does not redraw E(x)."
+        ),
+        "U": {
+            "role": "unit_selection",
+            "prior": "N(0, I)",
+            "shape": [n, k],
+            "values": _json_float_grid(U),
+        },
+        "E": {
+            "role": "factual_noise",
+            "prior": "N(0, sigma^2)",
+            "sigma": float(sigma),
+            "independent_of_U": True,
+            "shape": [n, d],
+            "values": _json_float_grid(E),
+        },
+        "V": ["Y"],
+        "F": {
+            "form": "unit_specific_factor",
+            "assignment": MECHANISM_LAW,
+            "column_normalize": bool(column_normalize),
+            "W": {
+                "role": "shared_feature_directions",
+                "prior": "N(0, I) then optional column L2-normalize",
+                "shape": [d, k],
+                "values": _json_float_grid(W),
+            },
+        },
+    }
+
+
 def sample_episode(
     rng: np.random.Generator,
     *,
@@ -56,6 +108,7 @@ def sample_episode(
     sigma: float = DEFAULT_SIGMA,
     column_normalize: bool = True,
     debug: bool = False,
+    return_mechanism: bool = False,
     seed: int | None = 0,
 ) -> dict[str, Any]:
     """Draw one observational Unit×Feature episode.
@@ -71,7 +124,9 @@ def sample_episode(
     column_normalize
         If True, L2-normalize columns of W.
     debug
-        If True, attach latent U, W and full Y. Default payloads omit them.
+        If True, attach Y_full and imply return_mechanism.
+    return_mechanism
+        If True, attach the DiscoSCM tuple behind this episode. Default omits it.
     seed
         Episode seed recorded in the payload (sampling uses `rng`).
     """
@@ -124,6 +179,11 @@ def sample_episode(
         },
         "seed": seed,
     }
+    want_mechanism = bool(return_mechanism or debug)
+    if want_mechanism:
+        payload["mechanism"] = pack_mechanism(
+            U=U, W=W, E=E, sigma=sigma, column_normalize=column_normalize
+        )
     if debug:
         payload["U"] = _json_float_grid(U)
         payload["W"] = _json_float_grid(W)
@@ -141,6 +201,7 @@ def sample_episodes(
     seed: int | None = 0,
     n_episodes: int = 1,
     debug: bool = False,
+    return_mechanism: bool = False,
     column_normalize: bool = True,
 ) -> list[dict[str, Any]]:
     """Draw n_episodes independent observational grids.
@@ -168,6 +229,7 @@ def sample_episodes(
                 sigma=sigma,
                 column_normalize=column_normalize,
                 debug=debug,
+                return_mechanism=return_mechanism,
                 seed=ep_seed,
             )
         )
