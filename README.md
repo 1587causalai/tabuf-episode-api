@@ -1,5 +1,7 @@
 # tabuf-episode-api
 
+生成语义以 [docs/data-generation.pdf](docs/data-generation.pdf) 为准（活文档）。API 是这份文档的临时投影，会跟着文档改。
+
 TabUF 第零版 **episode 数据 API**：先从总体抽 unit，再用 unit-specific response law 填 Unit×Feature 格子，最后盖查询掩码。观测数据 only，不是 DiscoSCM Layer 3 的论文复现。
 
 生成律：
