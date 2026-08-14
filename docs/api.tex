@@ -135,36 +135,36 @@ URL 里的 \texttt{/v0} 是生成语义版本，不是 HTTP 框架版本。
 \end{center}
 
 
+
 \section{\texttt{POST /v0/episodes}}
 
-一次返回 $n_{\mathrm{ep}}$ 条 episode。每条是\textbf{一张带 mask 的表}，不是一行。
-生成顺序：抽总体 $\{\mathbf{u}_i\}$ $\to$ 用 unit-specific law 填格 $\to$ 世界缺失 $\to$ 再在剩余格子上出查询题。
+一次返回 $n_{\mathrm{ep}}$ 条 episode，\textbf{每条各自抽一个总体}。
+表是完整的。missing 与 query 独立抽取，\textbf{允许重合}。
 
 \subsection{请求体}
 
-全部字段可选。缺省等于下表默认值。非法值返回 422。
-
 \begin{center}
-\begin{tabular}{@{}llclp{5.4cm}@{}}
+\begin{tabular}{@{}llclp{5.2cm}@{}}
 \toprule
 字段 & 类型 & 默认 & 范围 & 含义 \\
 \midrule
 \texttt{n\_units} & int & 64 & $[8,512]$ & 本集总体切片大小 \\
 \texttt{n\_features} & int & 8 & $[2,64]$ & 列数 $d$ \\
 \texttt{unit\_dim} & int & 4 & $[1,32]$ & 个体表征维 $k$ \\
-\texttt{query\_frac} & float & 0.15 & $(0,1)$ & value mask，占全表比例 \\
-\texttt{missing\_frac} & float & 0 & $[0,0.9)$ & 世界缺失，占全表比例 \\
-\texttt{sigma} & float & 0.3 & $[0,10]$ & 观测噪声标准差 \\
-\texttt{seed} & int/null & 0 & --- & 基种子；第 $e$ 集用 $\mathrm{seed}+e$ \\
-\texttt{n\_episodes} & int & 1 & $[1,32]$ & 一次返回多少条 episode \\
+\texttt{query\_frac} & float & 0.15 & $(0,1)$ & 要预测的格子占全表比例 \\
+\texttt{missing\_frac} & float & 0.05 & $[0,0.95)$ & 世界缺失占全表比例 \\
+\texttt{sigma} & float & 0.3 & $[0,10]$ & 潜变量噪声标准差 \\
+\texttt{seed} & int/null & 0 & --- & 第 $e$ 集用 $\mathrm{seed}+e$ \\
+\texttt{n\_episodes} & int & 1 & $[1,32]$ & 条数；各抽各的总体 \\
 \texttt{return\_mechanism} & bool & false & --- & 是否带总体和响应律 \\
-\texttt{debug} & bool & false & --- & 额外 $Y_{\mathrm{full}}$；隐含上一开关 \\
+\texttt{debug} & bool & false & --- & 额外潜分数 $S$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\texttt{query\_frac} 与 \texttt{missing\_frac} 都按全表格子计，抽成互不相交的两套。
-至少留 1 个上下文格和 1 个查询格。JSON 里\textbf{永远}有 \texttt{missing\_mask}，即使默认全 false。
+两套 mask 独立按全表比例抽样，因此 $M\cap Q$ 一般非空，并集也不一定是 $20\%$。
+$Q\cap M$ 是缺失填补，$Q\setminus M$ 是普通预测。没有单独的 $y$ 标签：真值就在完整的 \texttt{values} 里。
+网络可见的上下文是 $\neg M \wedge \neg Q$，不必再单开字段。
 
 \subsection{响应 200}
 
@@ -176,49 +176,27 @@ URL 里的 \texttt{/v0} 是生成语义版本，不是 HTTP 框架版本。
       "seed": 0,
       "table": {
         "n_units": 16,
-        "n_features": 4,
-        "values": [[0.12, null, ...], ...],
+        "n_features": 8,
+        "values": [[0.12, 3, 17, ...], ...],
         "missing_mask": [[false, true, ...], ...],
-        "context_mask": [[true, false, ...], ...],
-        "query_mask":   [[false, false, ...], ...],
-        "y_query": [0.87, ...],
-        "shapes": {"n_missing": 6, "n_context": 48, "n_query": 10, ...}
+        "query_mask":   [[true, true, ...], ...],
+        "column_types": ["numeric", "ordinal", "categorical", "high_cardinality", ...],
+        "n_classes": [null, 5, 12, 80, ...],
+        "shapes": {"n_missing": 6, "n_query": 19, "n_query_and_missing": 1}
       }
     }
   ]
 }
 \end{lstlisting}
 
-默认每条 episode 只有 \texttt{seed} 和 \texttt{table}。
+\texttt{values} 从不因 mask 挖空。数值列是 float，离散列是 $\{0,\ldots,K_j-1\}$ 的 int。
 
-\begin{center}
-\begin{tabular}{@{}llp{6.8cm}@{}}
-\toprule
-字段 & 形状 & 含义 \\
-\midrule
-\texttt{table.values} & $n\times d$ & 仅 $C$ 有数；缺失和查询为 \texttt{null} \\
-\texttt{table.missing\_mask} & $n\times d$ bool & World 缺失 $M$ \\
-\texttt{table.context\_mask} & $n\times d$ bool & 网络可见 $C$ \\
-\texttt{table.query\_mask} & $n\times d$ bool & 考题 $Q$（value mask） \\
-\texttt{table.y\_query} & $n_Q$ & $Q$ 上真值，行优先 \\
-\texttt{population} & 对象 & 仅 \texttt{return\_mechanism} \\
-\texttt{response\_law} & 对象 & 仅 \texttt{return\_mechanism} \\
-\texttt{Y\_full} & $n\times d$ & 仅 \texttt{debug} \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-不变量：
-
-\begin{align*}
-  M \cap C = C \cap Q = M \cap Q &= \emptyset,\\
-  M \cup C \cup Q &= \{1,\ldots,n\}\times\{1,\ldots,d\}.
-\end{align*}
-
-\texttt{values} 非空当且仅当该格 $\in C$。
+默认列类型比例（多项分布，按列抽）：数值 $0.40$，有序 $0.20$，多值类别 $0.25$，超多值类别 $0.15$。
+另外每列独立地以 $0.10$ 的概率与其它特征独立（不走 $\langle u_i,w_j\rangle$，只走自己的边际）。
 
 \begin{warnbox}
-训练 DataLoader 只吃 \texttt{table}。禁止 \texttt{return\_mechanism} / \texttt{debug}，禁止把 $u_i$ 喂进网络。
+训练只吃 \texttt{table}。真值用 \texttt{values} 在 \texttt{query\_mask} 处取值。
+不要把 \texttt{population.representations} 喂进网络。
 \end{warnbox}
 
 \subsection{打开机制时：总体 + unit-specific law}
@@ -243,7 +221,7 @@ URL 里的 \texttt{/v0} 是生成语义版本，不是 HTTP 框架版本。
 
 同一条 law 作用在每个人身上；unit-specific 是因为代入了这个人的 $u_i$。
 第零版 $E$ 只抽一次，不重抽反事实噪声。
-用表征、$W$、$E$ 可还原满表。\texttt{debug} 才会再给 \texttt{Y\_full}。
+用表征、$W$、$E$ 可还原满表。\texttt{debug} 才会再给潜分数 \texttt{S}。
 
 \begin{warnbox}
 \texttt{population.representations} 就是个体真名。检查生成器用，不要进训练。
@@ -290,7 +268,7 @@ curl -s -X POST http://127.0.0.1:8787/v0/episodes \
         "n_features": 4,
         "unit_dim": 4,
         "query_frac": 0.15,
-        "missing_frac": 0.1,
+        "missing_frac": 0.05,
         "sigma": 0.3,
         "seed": 0,
         "n_episodes": 2,

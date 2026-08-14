@@ -133,15 +133,15 @@ HTTP 路径、JSON 字段名、端口号，都是后话。
   \item $y^{Q}$：按 $M^{Q}$ 拉成向量的查询真值。
 \end{itemize}
 
+表 $\YY$ 是完整的，不因 mask 挖空。
+$M$ 与 $Q$ 独立按全表比例抽取，允许重合：
 \begin{equation}
-  M \cap C = C \cap Q = M \cap Q = \emptyset,
-  \qquad
-  M \cup C \cup Q = \{1,\ldots,n\}\times\{1,\ldots,d\}.
+  Q\cap M \text{ 缺失填补},\qquad
+  Q\setminus M \text{ 普通预测}.
 \end{equation}
-
-$M$ 是 World 级缺失（格子在世界上就没了）。
-$Q$ 是 Compiler 的 value mask（考题）。
-两者都按全表比例抽，互不相交。网络看见的 \texttt{values} 只在 $C$ 上非空。
+没有单独的 $y$ 标签。上下文是 $\neg M\wedge\neg Q$。
+默认 $P(M)=0.05$、$P(Q)=0.15$，并集不必是 $20\%$。
+每条 episode 各自抽一个总体。
 
 为什么是格子级，而不是整行、整列当 query？
 因为 \TabUF{} 要能回答的，不只是「这个人缺一个标签」，
@@ -414,8 +414,8 @@ Compiler 的张量合同先于 Prior 插件化。
 \texttt{n\_units} & 64 & 这一集实现多少 unit \\
 \texttt{n\_features} & 8 & 多少列 \\
 \texttt{unit\_dim} & 4 & $k$，个体潜空间维 \\
-\texttt{query\_frac} & 0.15 & value mask，占全表比例 \\
-\texttt{missing\_frac} & 0 & 世界缺失，占全表比例；JSON 始终带 mask \\
+\texttt{query\_frac} & 0.15 & 要预测的格子，与 missing 可重合 \\
+\texttt{missing\_frac} & 0.05 & 世界缺失，与 query 可重合 \\
 \texttt{sigma} & 0.3 & 观测噪声标准差 \\
 \texttt{seed} & 0 & 第 $e$ 集用 $\mathrm{seed}+e$ \\
 \texttt{n\_episodes} & 1 & 单次最多 32，纯属保护网关 \\

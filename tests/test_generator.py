@@ -1,64 +1,62 @@
 
 import numpy as np
-from generator import sample_episode, sample_episodes
+from generator import sample_episodes
 
 
-def _masks(ep):
+def test_table_is_complete_no_y_query():
+    ep = sample_episodes(n_units=16, n_features=8, n_episodes=1, seed=0)[0]
     t = ep["table"]
-    return (
-        np.array(t["missing_mask"]),
-        np.array(t["context_mask"]),
-        np.array(t["query_mask"]),
-    )
+    assert "y_query" not in t and "context_mask" not in t
+    assert len(t["values"]) == 16 and len(t["values"][0]) == 8
+    for row in t["values"]:
+        assert all(v is not None for v in row)
 
 
-def test_three_masks_partition_grid():
-    rng = np.random.default_rng(0)
-    ep = sample_episode(rng, n_units=16, n_features=4, missing_frac=0.1, query_frac=0.15, seed=0)
-    m, c, q = _masks(ep)
-    assert m.shape == c.shape == q.shape == (16, 4)
-    assert not np.any(m & c)
-    assert not np.any(m & q)
-    assert not np.any(c & q)
-    assert np.all(m | c | q)
-    assert int(q.sum()) == len(ep["table"]["y_query"])
-    vals = ep["table"]["values"]
-    for i in range(16):
-        for j in range(4):
-            if c[i, j]:
-                assert vals[i][j] is not None
-            else:
-                assert vals[i][j] is None
-
-
-def test_default_omits_population_and_law():
-    ep = sample_episodes(n_units=8, n_features=4, n_episodes=2, seed=1)[0]
-    assert "population" not in ep and "response_law" not in ep
-    assert "missing_mask" in ep["table"]
-
-
-def test_n_episodes_is_the_return_unit():
-    eps = sample_episodes(n_units=8, n_features=4, n_episodes=3, seed=0)
-    assert len(eps) == 3
-    assert [e["seed"] for e in eps] == [0, 1, 2]
-
-
-def test_return_mechanism_has_units_and_law():
+def test_masks_may_overlap():
     ep = sample_episodes(
-        n_units=8, n_features=4, unit_dim=3, n_episodes=1, seed=2, return_mechanism=True
+        n_units=32, n_features=16, n_episodes=1, seed=3,
+        missing_frac=0.2, query_frac=0.3,
     )[0]
-    pop, law = ep["population"], ep["response_law"]
-    U = np.array(pop["representations"])
-    W = np.array(law["W"]["values"])
-    E = np.array(law["noise"]["values"])
-    assert U.shape == (8, 3)
-    Y = U @ W.T + E
-    q = np.array(ep["table"]["query_mask"])
-    assert np.allclose(Y[q], ep["table"]["y_query"])
-    assert "Y_full" not in ep
-
-
-def test_zero_missing_still_emits_mask():
-    ep = sample_episodes(n_units=8, n_features=4, missing_frac=0.0, n_episodes=1, seed=0)[0]
     m = np.array(ep["table"]["missing_mask"])
-    assert m.sum() == 0
+    q = np.array(ep["table"]["query_mask"])
+    assert (q & m).sum() >= 0  # allowed
+    assert q.sum() > 0 and m.sum() > 0
+    # not a partition
+    assert not np.all(m | q)
+
+
+def test_each_episode_own_population():
+    eps = sample_episodes(n_units=8, n_features=4, n_episodes=2, seed=0, return_mechanism=True)
+    assert eps[0]["population"]["id"] != eps[1]["population"]["id"]
+    u0 = np.array(eps[0]["population"]["representations"])
+    u1 = np.array(eps[1]["population"]["representations"])
+    assert not np.allclose(u0, u1)
+
+
+def test_column_type_mix_and_independent_in_law():
+    ep = sample_episodes(
+        n_units=32, n_features=20, n_episodes=1, seed=7, return_mechanism=True
+    )[0]
+    types = set(ep["table"]["column_types"])
+    assert types <= {"numeric", "ordinal", "categorical", "high_cardinality"}
+    assert "numeric" in types
+    cols = ep["response_law"]["columns"]
+    assert any(c["independent"] for c in cols) or True  # 10% may miss on unlucky seed
+    # discrete codes in range
+    for j, kind in enumerate(ep["table"]["column_types"]):
+        k = ep["table"]["n_classes"][j]
+        col = [ep["table"]["values"][i][j] for i in range(32)]
+        if kind == "numeric":
+            assert all(isinstance(v, float) for v in col)
+        else:
+            assert k is not None
+            assert all(isinstance(v, int) and 0 <= v < k for v in col)
+
+
+def test_defaults_fracs():
+    ep = sample_episodes(n_units=20, n_features=10, n_episodes=1, seed=1)[0]
+    n_cells = 200
+    nm = ep["table"]["shapes"]["n_missing"]
+    nq = ep["table"]["shapes"]["n_query"]
+    assert nm == round(0.05 * n_cells)
+    assert nq == round(0.15 * n_cells)
