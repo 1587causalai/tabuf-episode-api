@@ -25,7 +25,7 @@ $$
 - 噪声族：每列 gaussian / student_t / cauchy（$0.50/0.30/0.20$），用于根 token、正交创新、以及 numeric / binary / ordinal 观测噪声。填格对 $u$ 线性：数值 affine、二值 latent threshold、有序 ordered probit、$K$ 类 linear softmax（不再 Gumbel-max）
 - 训练默认 **不返回** $U$ / DAG / $\mathbf{t}_j$（`debug` 或 `return_mechanism` 才带）
 
-线上信封：完整 `values` + `missing_mask` + `query_mask`。默认 $P(M_{ij}=1)=0.05$，$P(Q_{ij}=1)=0.15$，独立抽取，允许重合。没有 `y_input` / `y_query`。
+线上信封：完整 `values` + `missing_mask` + `query_mask`。默认 $P(M_{ij}=1)=0.05$，DiscoSCM 和监督表相同。`query_mode` 两种：`any_cell`（默认，全表抽 $0.15$）或 `label_cell`（只在目标列上抽 $0.15$ 行）。两张 mask 独立，允许重合。没有 `y_input` / `y_query`。
 
 ## 运行
 

@@ -90,9 +90,12 @@ def test_scm_has_edges_when_mechanism_on():
     assert "edges" in mech
     assert "node_fn" in mech
     assert mech["target_col"] == 5
-    q = ep["table"]["query_mask"]
-    assert all(row[-1] for row in q)
-    assert ep["table"].get("query_mode") == "label_column"
+    q = np.array(ep["table"]["query_mask"])
+    n = q.shape[0]
+    n_q = max(1, min(int(round(0.15 * n)), n))
+    assert q[:, -1].sum() == n_q
+    assert not q[:, :-1].any()
+    assert ep["table"].get("query_mode") == "label_cell"
     blob = str(mech)
     assert "unit" not in blob.lower()
 
@@ -104,15 +107,18 @@ def test_sklearn_real_iris():
     assert ep["table"]["n_features"] == 4
 
 
-def test_sklearn_real_queries_label_column():
+def test_sklearn_real_queries_label_cell():
     ep = sample_episodes(
         n_units=30, n_features=5, n_episodes=1, seed=0,
         source="sklearn_real", source_name="iris",
         missing_frac=None, query_frac=None,
     )[0]
-    q = ep["table"]["query_mask"]
-    assert all(row[-1] for row in q)
-    assert ep["table"].get("query_mode") == "label_column"
+    q = np.array(ep["table"]["query_mask"])
+    n = q.shape[0]
+    n_q = max(1, min(int(round(0.15 * n)), n))
+    assert q[:, -1].sum() == n_q
+    assert not q[:, :-1].any()
+    assert ep["table"].get("query_mode") == "label_cell"
 
 def test_sklearn_iris_canonical_source():
     ep = sample_episodes(
@@ -121,20 +127,26 @@ def test_sklearn_iris_canonical_source():
     )[0]
     assert ep["table"]["n_features"] == 4
     assert ep["table"].get("source") == "sklearn_iris"
-    q = ep["table"]["query_mask"]
-    assert all(row[-1] for row in q)
-    assert ep["table"].get("query_mode") == "label_column"
+    q = np.array(ep["table"]["query_mask"])
+    n = q.shape[0]
+    n_q = max(1, min(int(round(0.15 * n)), n))
+    assert q[:, -1].sum() == n_q
+    assert not q[:, :-1].any()
+    assert ep["table"].get("query_mode") == "label_cell"
     assert "population" not in ep
 
 
-def test_sklearn_make_classification_label_column():
+def test_sklearn_make_classification_label_cell():
     ep = sample_episodes(
         n_units=24, n_features=6, n_episodes=1, seed=0,
         source="sklearn_make_classification", return_mechanism=True,
     )[0]
-    q = ep["table"]["query_mask"]
-    assert all(row[-1] for row in q)
-    assert ep["table"].get("query_mode") == "label_column"
+    q = np.array(ep["table"]["query_mask"])
+    n = q.shape[0]
+    n_q = max(1, min(int(round(0.15 * n)), n))
+    assert q[:, -1].sum() == n_q
+    assert not q[:, :-1].any()
+    assert ep["table"].get("query_mode") == "label_cell"
     assert ep["table"]["column_types"][-1] == "binary"
     assert ep["table"]["n_classes"][-1] == 2
     assert "population" not in ep
@@ -142,12 +154,26 @@ def test_sklearn_make_classification_label_column():
     assert ep["mechanism"]["maker"] == "make_classification"
 
 
+def test_supervised_default_missing_is_five_percent():
+    cases = [
+        ("scm", 16, 6),
+        ("sklearn_make_classification", 24, 6),
+        ("sklearn_iris", 30, 4),
+    ]
+    for src, n, d in cases:
+        ep = sample_episodes(
+            n_units=n, n_features=d, n_episodes=1, seed=0, source=src,
+        )[0]
+        n_cells = n * ep["table"]["n_features"]
+        assert ep["table"]["shapes"]["n_missing"] == round(0.05 * n_cells), src
+
+
 def test_sklearn_low_rank_is_cellwise_not_supervised():
     ep = sample_episodes(
         n_units=20, n_features=8, n_episodes=1, seed=2,
         source="sklearn_low_rank",
     )[0]
-    assert ep["table"].get("query_mode") == "cells"
+    assert ep["table"].get("query_mode") == "any_cell"
     q = ep["table"]["query_mask"]
     # not the whole last column
     assert not all(row[-1] for row in q)
@@ -584,25 +610,36 @@ def test_population_mixture_can_be_multi_component():
     assert max(seen) > 1
 
 
-def test_discoscm_label_column_query():
+def test_discoscm_label_cell_query():
     ep = sample_episodes(
         n_units=20, n_features=8, n_episodes=1, seed=0,
-        query_mode="label_column", missing_frac=0.0, query_column=3,
+        query_mode="label_cell", query_column=3,
     )[0]
     q = np.array(ep["table"]["query_mask"])
     m = np.array(ep["table"]["missing_mask"])
-    assert ep["table"]["query_mode"] == "label_column"
+    assert ep["table"]["query_mode"] == "label_cell"
     assert ep["table"]["query_column"] == 3
     assert q.shape == (20, 8)
-    assert q[:, 3].all()
+    assert q[:, 3].sum() == max(1, min(int(round(0.15 * 20)), 20))
     assert not q[:, :3].any() and not q[:, 4:].any()
-    assert m.sum() == 0
+    assert m.sum() == round(0.05 * 20 * 8)
     assert ep["table"]["column_types"][3] in {
         "numeric", "ordinal", "binary", "categorical", "high_cardinality"
     }
 
 
+def test_legacy_cells_alias_any_cell():
+    ep = sample_episodes(
+        n_units=20, n_features=8, n_episodes=1, seed=3,
+        query_mode="cells",
+    )[0]
+    assert ep["table"]["query_mode"] == "any_cell"
+    n_cells = 20 * 8
+    assert ep["table"]["shapes"]["n_query"] == max(1, int(round(0.15 * n_cells)))
+
+
 def test_default_n_episodes_is_eight():
+
     eps = sample_episodes(n_units=8, n_features=4, seed=0, unit_dim=4)
     assert len(eps) == 8
     assert {ep["table"]["n_units"] for ep in eps} == {8}

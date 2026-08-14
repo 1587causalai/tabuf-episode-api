@@ -601,17 +601,32 @@ def _realize_column(
 
 
 
+def canonical_query_mode(query_mode: str | None) -> str:
+    """Two modes: any_cell (whole grid) and label_cell (one target column).
+
+    Legacy aliases: cells / observed_cells → any_cell; label_column → label_cell.
+    """
+    raw = (query_mode or "any_cell").strip().lower()
+    if raw in ("label_cell", "label_column"):
+        return "label_cell"
+    return "any_cell"
+
+
 def _compile_masks(
     rng: np.random.Generator,
     n: int,
     d: int,
-    missing_frac: float,
-    query_frac: float,
+    missing_frac: float | None,
+    query_frac: float | None,
     query_mode: str | None = None,
     query_column: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, str, int | None]:
-    """MCAR cell missing; query is either scattered cells or one whole column."""
+    """MCAR missing over the grid; query is any_cell or label_cell at query_frac."""
     n_cells = n * d
+    if missing_frac is None:
+        missing_frac = DEFAULT_MISSING_FRAC
+    if query_frac is None:
+        query_frac = DEFAULT_QUERY_FRAC
     missing_frac = float(np.clip(missing_frac, 0.0, 0.95))
     query_frac = float(np.clip(query_frac, 0.0, 0.95))
     n_miss = max(0, min(int(round(missing_frac * n_cells)), n_cells))
@@ -619,20 +634,20 @@ def _compile_masks(
     if n_miss:
         missing_flat[rng.choice(n_cells, size=n_miss, replace=False)] = True
     missing_mask = missing_flat.reshape(n, d)
-    mode = query_mode or "cells"
+    mode = canonical_query_mode(query_mode)
     query_mask = np.zeros((n, d), dtype=bool)
     held = None
-    if mode == "label_column":
+    if mode == "label_cell":
         held = d - 1 if query_column is None else int(query_column)
         held = int(np.clip(held, 0, d - 1))
-        query_mask[:, held] = True
-        mode = "label_column"
+        n_query = max(1, min(int(round(query_frac * n)), n))
+        rows = rng.choice(n, size=n_query, replace=False)
+        query_mask[rows, held] = True
     else:
         n_query = max(1, min(int(round(query_frac * n_cells)), n_cells))
         query_flat = np.zeros(n_cells, dtype=bool)
         query_flat[rng.choice(n_cells, size=n_query, replace=False)] = True
         query_mask = query_flat.reshape(n, d)
-        mode = "observed_cells" if mode == "observed_cells" else "cells"
     return missing_mask, query_mask, mode, held
 
 

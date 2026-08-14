@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from generator import _json_bool_grid, DEFAULT_MISSING_FRAC, DEFAULT_QUERY_FRAC
+from generator import _json_bool_grid, DEFAULT_MISSING_FRAC, DEFAULT_QUERY_FRAC, canonical_query_mode
 
 SKLEARN_SYNTH_CANONICAL = {
     "sklearn_make_classification": "make_classification",
@@ -83,7 +83,7 @@ SOURCE_PROFILES: dict[str, dict[str, Any]] = {
         "status": "ready",
         "family": "discoscm",
         "row_meaning": "unit",
-        "query_mode": "cells",
+        "query_mode": "any_cell",
         "query_frac": DEFAULT_QUERY_FRAC,
         "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": True,
@@ -94,51 +94,51 @@ SOURCE_PROFILES: dict[str, dict[str, Any]] = {
         "status": "ready",
         "family": "scm",
         "row_meaning": "iid_sample",
-        "query_mode": "label_column",
-        "query_frac": None,
-        "missing_frac": 0.0,
+        "query_mode": "label_cell",
+        "query_frac": DEFAULT_QUERY_FRAC,
+        "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
         **_rf(_SHARED + _SIGMA, _DISCOSCM_ONLY + _DEBUG + _SOURCE_NAME),
-        "note": "i.i.d. rows from a random additive-noise DAG over features; last column is the prediction target.",
+        "note": "i.i.d. rows from a random additive-noise DAG over features; last column is the prediction target; missing 0.05.",
     },
     "sklearn_make_classification": {
         "status": "ready",
         "family": "sklearn_synthetic",
         "row_meaning": "iid_sample",
-        "query_mode": "label_column",
-        "query_frac": None,
-        "missing_frac": 0.0,
+        "query_mode": "label_cell",
+        "query_frac": DEFAULT_QUERY_FRAC,
+        "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
         **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
-        "note": "sklearn make_classification; last column is binary y; no missing by default.",
+        "note": "sklearn make_classification; last column is binary y; missing 0.05 / query 0.15 of the label column.",
     },
     "sklearn_make_regression": {
         "status": "ready",
         "family": "sklearn_synthetic",
         "row_meaning": "iid_sample",
-        "query_mode": "label_column",
-        "query_frac": None,
-        "missing_frac": 0.0,
+        "query_mode": "label_cell",
+        "query_frac": DEFAULT_QUERY_FRAC,
+        "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
         **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
-        "note": "sklearn make_regression; last column is continuous y; no missing by default.",
+        "note": "sklearn make_regression; last column is continuous y; missing 0.05 / query 0.15 of the label column.",
     },
     "sklearn_friedman1": {
         "status": "ready",
         "family": "sklearn_synthetic",
         "row_meaning": "iid_sample",
-        "query_mode": "label_column",
-        "query_frac": None,
-        "missing_frac": 0.0,
+        "query_mode": "label_cell",
+        "query_frac": DEFAULT_QUERY_FRAC,
+        "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
         **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
-        "note": "sklearn Friedman #1; last column is continuous y; no missing by default.",
+        "note": "sklearn Friedman #1; last column is continuous y; missing 0.05 / query 0.15 of the label column.",
     },
     "sklearn_low_rank": {
         "status": "ready",
         "family": "sklearn_synthetic",
         "row_meaning": "iid_sample",
-        "query_mode": "cells",
+        "query_mode": "any_cell",
         "query_frac": DEFAULT_QUERY_FRAC,
         "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
@@ -149,53 +149,53 @@ SOURCE_PROFILES: dict[str, dict[str, Any]] = {
         "status": "ready",
         "family": "sklearn_real",
         "row_meaning": "entity_row",
-        "query_mode": "label_column",
-        "query_frac": None,
-        "missing_frac": 0.0,
+        "query_mode": "label_cell",
+        "query_frac": DEFAULT_QUERY_FRAC,
+        "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
         **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
-        "note": "Bundled iris table; last column is the class label.",
+        "note": "Bundled iris table; last column is the class label; missing 0.05.",
     },
     "sklearn_wine": {
         "status": "ready",
         "family": "sklearn_real",
         "row_meaning": "entity_row",
-        "query_mode": "label_column",
-        "query_frac": None,
-        "missing_frac": 0.0,
+        "query_mode": "label_cell",
+        "query_frac": DEFAULT_QUERY_FRAC,
+        "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
         **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
-        "note": "Bundled wine table; last column is the class label.",
+        "note": "Bundled wine table; last column is the class label; missing 0.05.",
     },
     "sklearn_breast_cancer": {
         "status": "ready",
         "family": "sklearn_real",
         "row_meaning": "entity_row",
-        "query_mode": "label_column",
-        "query_frac": None,
-        "missing_frac": 0.0,
+        "query_mode": "label_cell",
+        "query_frac": DEFAULT_QUERY_FRAC,
+        "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
         **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
-        "note": "Bundled breast_cancer table; last column is the class label.",
+        "note": "Bundled breast_cancer table; last column is the class label; missing 0.05.",
     },
     "sklearn_diabetes": {
         "status": "ready",
         "family": "sklearn_real",
         "row_meaning": "entity_row",
-        "query_mode": "label_column",
-        "query_frac": None,
-        "missing_frac": 0.0,
+        "query_mode": "label_cell",
+        "query_frac": DEFAULT_QUERY_FRAC,
+        "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
         **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
-        "note": "Bundled diabetes table; last column is the continuous target.",
+        "note": "Bundled diabetes table; last column is the continuous target; missing 0.05.",
     },
     "sklearn_synthetic": {
         "status": "ready",
         "family": "sklearn_synthetic",
         "row_meaning": "iid_sample",
-        "query_mode": "label_column",
-        "query_frac": None,
-        "missing_frac": 0.0,
+        "query_mode": "label_cell",
+        "query_frac": DEFAULT_QUERY_FRAC,
+        "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
         **_rf(_ALIAS_USED, _ALIAS_IGNORED),
         "note": "Alias: pass source_name to pick a maker, or one is drawn at random. Per-maker masks follow the canonical profile.",
@@ -206,9 +206,9 @@ SOURCE_PROFILES: dict[str, dict[str, Any]] = {
         "status": "ready",
         "family": "sklearn_real",
         "row_meaning": "entity_row",
-        "query_mode": "label_column",
-        "query_frac": None,
-        "missing_frac": 0.0,
+        "query_mode": "label_cell",
+        "query_frac": DEFAULT_QUERY_FRAC,
+        "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
         **_rf(_ALIAS_USED, _ALIAS_IGNORED),
         "note": "Alias: pass source_name to pick a bundled table, or one is drawn at random.",
@@ -219,23 +219,23 @@ SOURCE_PROFILES: dict[str, dict[str, Any]] = {
         "status": "placeholder",
         "family": "openml",
         "row_meaning": "entity_row",
-        "query_mode": "label_column",
-        "query_frac": None,
-        "missing_frac": 0.0,
+        "query_mode": "label_cell",
+        "query_frac": DEFAULT_QUERY_FRAC,
+        "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
         **_rf(_PLACEHOLDER_USED, _PLACEHOLDER_IGNORED),
-        "note": "OpenML classification/regression tables; last column is the label; returns 501 until cached.",
+        "note": "OpenML classification/regression tables; last column is the label; missing 0.05; returns 501 until cached.",
     },
     "recsys": {
         "status": "placeholder",
         "family": "recsys",
         "row_meaning": "user",
-        "query_mode": "observed_cells",
+        "query_mode": "any_cell",
         "query_frac": DEFAULT_QUERY_FRAC,
-        "missing_frac": 0.0,
+        "missing_frac": DEFAULT_MISSING_FRAC,
         "uses_unit_token": False,
         **_rf(_PLACEHOLDER_USED, _PLACEHOLDER_IGNORED),
-        "note": "User×Item ratings; unobserved entries are missing; query is a subset of observed ratings; returns 501 until cached.",
+        "note": "User×Item ratings; compiler missing 0.05 until unobserved-as-missing is wired; returns 501 until cached.",
     },
 }
 
@@ -260,7 +260,7 @@ def resolve_profile(
     if query_frac is not None:
         base["query_frac"] = query_frac
     if base.get("missing_frac") is None:
-        base["missing_frac"] = 0.0
+        base["missing_frac"] = DEFAULT_MISSING_FRAC
     if base.get("query_frac") is None:
         base["query_frac"] = DEFAULT_QUERY_FRAC
     return base
@@ -273,6 +273,7 @@ def _masks(
     missing_frac: float,
     query_frac: float,
     query_mode: str,
+    query_column: int | None = None,
 ):
     n_cells = n * d
     n_miss = max(0, min(int(round(float(missing_frac) * n_cells)), n_cells))
@@ -281,20 +282,20 @@ def _masks(
         missing_flat[rng.choice(n_cells, size=n_miss, replace=False)] = True
     missing_mask = missing_flat.reshape(n, d)
     query_mask = np.zeros((n, d), dtype=bool)
-    mode = query_mode or "cells"
-    if mode == "label_column":
-        query_mask[:, -1] = True
-    elif mode == "observed_cells":
-        n_query = max(1, min(int(round(float(query_frac) * n_cells)), n_cells))
-        query_flat = np.zeros(n_cells, dtype=bool)
-        query_flat[rng.choice(n_cells, size=n_query, replace=False)] = True
-        query_mask = query_flat.reshape(n, d)
+    mode = canonical_query_mode(query_mode)
+    held = None
+    if mode == "label_cell":
+        held = d - 1 if query_column is None else int(query_column)
+        held = int(max(0, min(held, d - 1)))
+        n_query = max(1, min(int(round(float(query_frac) * n)), n))
+        rows = rng.choice(n, size=n_query, replace=False)
+        query_mask[rows, held] = True
     else:
         n_query = max(1, min(int(round(float(query_frac) * n_cells)), n_cells))
         query_flat = np.zeros(n_cells, dtype=bool)
         query_flat[rng.choice(n_cells, size=n_query, replace=False)] = True
         query_mask = query_flat.reshape(n, d)
-    return missing_mask, query_mask
+    return missing_mask, query_mask, mode, held
 
 
 def pack_grid(
@@ -308,12 +309,12 @@ def pack_grid(
     seed: int | None,
     return_mechanism: bool,
     mechanism: dict[str, Any] | None,
-    query_mode: str = "cells",
+    query_mode: str = "any_cell",
     source: str | None = None,
     mechanism_field: str = "mechanism",
 ) -> dict[str, Any]:
     n, d = int(Y.shape[0]), int(Y.shape[1])
-    missing_mask, query_mask = _masks(rng, n, d, missing_frac, query_frac, query_mode)
+    missing_mask, query_mask, mode, held = _masks(rng, n, d, missing_frac, query_frac, query_mode)
     values: list[list[float | int]] = []
     for i in range(n):
         row: list[float | int] = []
@@ -338,7 +339,8 @@ def pack_grid(
             "n_query": int(query_mask.sum()),
             "n_query_and_missing": int((query_mask & missing_mask).sum()),
         },
-        "query_mode": query_mode,
+        "query_mode": mode,
+        "query_column": held,
         "source": source,
     }
     payload: dict[str, Any] = {"seed": seed, "table": table}
@@ -378,7 +380,7 @@ def sklearn_synthetic(
     seed: int | None,
     return_mechanism: bool,
     source_name: str | None = None,
-    query_mode: str = "label_column",
+    query_mode: str = "label_cell",
     source: str | None = None,
 ) -> dict[str, Any]:
     from sklearn.datasets import (
@@ -446,7 +448,7 @@ def sklearn_real(
     seed: int | None,
     return_mechanism: bool,
     source_name: str | None = None,
-    query_mode: str = "label_column",
+    query_mode: str = "label_cell",
     source: str | None = None,
 ) -> dict[str, Any]:
     from sklearn.datasets import load_breast_cancer, load_diabetes, load_iris, load_wine
@@ -492,7 +494,7 @@ def scm_anm(
     seed: int | None,
     return_mechanism: bool,
     sigma: float,
-    query_mode: str = "label_column",
+    query_mode: str = "label_cell",
     source: str | None = None,
 ) -> dict[str, Any]:
     """Additive-noise SCM: i.i.d. rows from a random DAG over features.

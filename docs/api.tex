@@ -194,7 +194,7 @@ $[16,5]$、$[16,43]$、$[16,12]$、$\ldots$（$d$、$k$ 每条都重抽）。
       "query_mask": [[true, ...], ...],
       "column_types": ["numeric", ...],
       "n_classes": [null, ...],
-      "query_mode": "cells",
+      "query_mode": "any_cell",
       "shapes": {
         "values": [16, 8],
         "missing_mask": [16, 8],
@@ -220,18 +220,18 @@ $[16,5]$、$[16,43]$、$[16,12]$、$\ldots$（$d$、$k$ 每条都重抽）。
 \toprule
 canonical & 别名 & 行含义 & query & missing & HTTP \\
 \midrule
-\texttt{discoscm} & --- & unit & cells $0.15$ & $0.05$ & 200 \\
-\texttt{scm} & --- & iid\_sample & label\_column & $0$ & 200 \\
-\texttt{sklearn\_make\_classification} & synth$^*$ & iid\_sample & label\_column & $0$ & 200 \\
-\texttt{sklearn\_make\_regression} & synth$^*$ & iid\_sample & label\_column & $0$ & 200 \\
-\texttt{sklearn\_friedman1} & synth$^*$ & iid\_sample & label\_column & $0$ & 200 \\
-\texttt{sklearn\_low\_rank} & synth$^*$ & iid\_sample & cells $0.15$ & $0.05$ & 200 \\
-\texttt{sklearn\_iris} & real$^\dagger$ & entity\_row & label\_column & $0$ & 200 \\
-\texttt{sklearn\_wine} & real$^\dagger$ & entity\_row & label\_column & $0$ & 200 \\
-\texttt{sklearn\_breast\_cancer} & real$^\dagger$ & entity\_row & label\_column & $0$ & 200 \\
-\texttt{sklearn\_diabetes} & real$^\dagger$ & entity\_row & label\_column & $0$ & 200 \\
-\texttt{openml} & --- & entity\_row & label\_column & $0$ & 501 \\
-\texttt{recsys} & --- & user & observed\_cells $0.15$ & 未观测 & 501 \\
+\texttt{discoscm} & --- & unit & any\_cell $0.15$ & $0.05$ & 200 \\
+\texttt{scm} & --- & iid\_sample & label\_cell $0.15$ & $0.05$ & 200 \\
+\texttt{sklearn\_make\_classification} & synth$^*$ & iid\_sample & label\_cell $0.15$ & $0.05$ & 200 \\
+\texttt{sklearn\_make\_regression} & synth$^*$ & iid\_sample & label\_cell $0.15$ & $0.05$ & 200 \\
+\texttt{sklearn\_friedman1} & synth$^*$ & iid\_sample & label\_cell $0.15$ & $0.05$ & 200 \\
+\texttt{sklearn\_low\_rank} & synth$^*$ & iid\_sample & any\_cell $0.15$ & $0.05$ & 200 \\
+\texttt{sklearn\_iris} & real$^\dagger$ & entity\_row & label\_cell $0.15$ & $0.05$ & 200 \\
+\texttt{sklearn\_wine} & real$^\dagger$ & entity\_row & label\_cell $0.15$ & $0.05$ & 200 \\
+\texttt{sklearn\_breast\_cancer} & real$^\dagger$ & entity\_row & label\_cell $0.15$ & $0.05$ & 200 \\
+\texttt{sklearn\_diabetes} & real$^\dagger$ & entity\_row & label\_cell $0.15$ & $0.05$ & 200 \\
+\texttt{openml} & --- & entity\_row & label\_cell $0.15$ & $0.05$ & 501 \\
+\texttt{recsys} & --- & user & any\_cell $0.15$ & $0.05$ & 501 \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -247,9 +247,10 @@ canonical & 别名 & 行含义 & query & missing & HTTP \\
         \texttt{iris} / \texttt{wine} / \texttt{breast\_cancer} / \texttt{diabetes}；省略则随机。
 \end{itemize}
 
-\texttt{label\_column}：query 为最后一整列（标签/$y$）。
-\texttt{sklearn\_low\_rank} 无标签列。
-\texttt{recsys} 未观测格即 missing；query 是已观测评分的子集。
+\texttt{any\_cell}：按 \texttt{query\_frac}（默认 $0.15$）在全表抽 query 格子。
+\texttt{label\_cell}：只在目标列（默认最后一列，可用 \texttt{query\_column}）上按同样比例抽行；其它列不当 query。
+\texttt{sklearn\_low\_rank} 无标签列，走 \texttt{any\_cell}。
+旧名 \texttt{cells}/\texttt{observed\_cells}、\texttt{label\_column} 仍接受。
 
 \section{return\_mechanism：哪些键出现}
 \label{sec:mech}

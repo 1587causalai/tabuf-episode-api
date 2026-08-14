@@ -431,7 +431,7 @@ $\varphi$ 只作用在 token SEM 的 $\mathbf{s}^{\mathrm{raw}}$ 上，不作用
 \subsection{Compiler 在 DiscoSCM 上的默认}
 
 格子级。默认 $P(M)=0.05$、$P(Q)=0.15$，独立抽取，并集不必是 $20\%$。
-\texttt{query\_mode=cells}。\texttt{uses\_unit\_token=true}。
+\texttt{query\_mode=any\_cell}。\texttt{uses\_unit\_token=true}。
 \texttt{n\_units} 默认 $1000$（API 上限 $4096$）。
 \texttt{n\_features} 默认 \texttt{null}（从先验抽样，众数约 $20$，支持 $[2,1000]$）。
 \texttt{unit\_dim} 默认 \texttt{null}（从先验抽样，众数约 $16$，支持 $[2,1024]$）。
@@ -501,7 +501,7 @@ $n,d$ curriculum。每加一层先改这一附录，再改代码。
 \texttt{unit\_dim} / \texttt{type\_weights} / \texttt{independent\_frac} / \texttt{population}
 不适用，响应里不会出现。
 
-默认 \texttt{query\_mode=label\_column}，\texttt{missing\_frac=0}。
+默认 \texttt{query\_mode=label\_cell}，\texttt{missing\_frac=0.05}。
 机制在字段 \texttt{mechanism}，键为
 \texttt{framework}、\texttt{edges}、\texttt{node\_fn}、\texttt{target\_col}。
 \texttt{target\_col}=$d-1$。这是特征 DAG，不是个体响应律。
@@ -515,23 +515,23 @@ $n,d$ curriculum。每加一层先改这一附录，再改代码。
 别名仍可用：省略子名则随机抽一个 maker，并套用该 maker 的画像。
 
 \subsection{sklearn\_make\_classification}
-最后一列二值 $y$。默认 label\_column，missing $0$。
+最后一列二值 $y$。默认 \texttt{label\_cell}，missing $0.05$。
 
 \subsection{sklearn\_make\_regression}
-最后一列连续 $y$。默认 label\_column，missing $0$。
+最后一列连续 $y$。默认 \texttt{label\_cell}，missing $0.05$。
 
 \subsection{sklearn\_friedman1}
-Friedman \#1。最后一列连续 $y$。默认 label\_column，missing $0$。
+Friedman \#1。最后一列连续 $y$。默认 \texttt{label\_cell}，missing $0.05$。
 
 \subsection{sklearn\_low\_rank}
-低秩矩阵。\textbf{没有}标签列。默认 cells，missing $0.05$ / query $0.15$，按矩阵补全出题。
+低秩矩阵。\textbf{没有}标签列。默认 \texttt{any\_cell}，missing $0.05$ / query $0.15$，按矩阵补全出题。
 
 \section{sklearn 真实表}
 \label{app:skreal}
 
 行是实体行（\texttt{entity\_row}），不是 unit。
 对原表按请求的行数、列数子采样，保留最后一列。
-默认 label\_column，missing $0$。
+默认 \texttt{label\_cell}，missing $0.05$。
 
 \texttt{sklearn\_iris}、\texttt{sklearn\_wine}、\texttt{sklearn\_breast\_cancer}：最后一列类别。
 \texttt{sklearn\_diabetes}：最后一列连续靶。
@@ -540,14 +540,14 @@ Friedman \#1。最后一列连续 $y$。默认 label\_column，missing $0$。
 \section{OpenML 占位}
 \label{app:openml}
 
-监督表。行是 \texttt{entity\_row}。默认 label\_column，missing $0$。
+监督表。行是 \texttt{entity\_row}。默认 \texttt{label\_cell}，missing $0.05$。
 缓存接上之前这条通道还不能出表。不要用 DiscoSCM 的词描述它。
 
 \section{推荐占位}
 \label{app:recsys}
 
 User$\times$Item 矩阵。行含义是 \texttt{user}。
-未观测格是 missing；query 是已观测评分的子集（模式 \texttt{observed\_cells}）。
+未观测格是 missing；query 用 \texttt{any\_cell}，按 $0.15$ 抽格子。
 缓存接上之前这条通道还不能出表。
 
 \section{各来源默认 mask}
@@ -559,13 +559,13 @@ User$\times$Item 矩阵。行含义是 \texttt{user}。
 \toprule
 通道 & 行含义 & query\_mode & missing & query \\
 \midrule
-discoscm & unit & cells & $0.05$ & $0.15$ \\
-scm & iid\_sample & label\_column & $0$ & （整列 $y$） \\
-sklearn 分类/回归/Friedman & iid\_sample & label\_column & $0$ & （整列 $y$） \\
-sklearn\_low\_rank & iid\_sample & cells & $0.05$ & $0.15$ \\
-sklearn 真实表 & entity\_row & label\_column & $0$ & （整列标签） \\
-openml & entity\_row & label\_column & $0$ & （整列标签） \\
-recsys & user & observed\_cells & 未观测 & 已观测的 $0.15$ \\
+discoscm & unit & any\_cell & $0.05$ & 全表 $0.15$ \\
+scm & iid\_sample & label\_cell & $0.05$ & 目标列 $0.15$ \\
+sklearn 分类/回归/Friedman & iid\_sample & label\_cell & $0.05$ & 目标列 $0.15$ \\
+sklearn\_low\_rank & iid\_sample & any\_cell & $0.05$ & 全表 $0.15$ \\
+sklearn 真实表 & entity\_row & label\_cell & $0.05$ & 目标列 $0.15$ \\
+openml & entity\_row & label\_cell & $0.05$ & 目标列 $0.15$ \\
+recsys & user & any\_cell & $0.05$ & 全表 $0.15$ \\
 \bottomrule
 \end{tabular}
 \end{center}

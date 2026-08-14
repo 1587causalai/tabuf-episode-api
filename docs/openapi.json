@@ -220,7 +220,7 @@
               }
             ],
             "title": "Query Frac",
-            "description": "缺省则用来源画像默认"
+            "description": "any_cell：全表比例；label_cell：目标列行比例。缺省 0.15"
           },
           "missing_frac": {
             "anyOf": [
@@ -232,7 +232,7 @@
               }
             ],
             "title": "Missing Frac",
-            "description": "缺省则用来源画像默认"
+            "description": "缺省 0.05，所有来源相同"
           },
           "query_mode": {
             "anyOf": [
@@ -244,7 +244,7 @@
               }
             ],
             "title": "Query Mode",
-            "description": "cells | label_column | observed_cells；缺省用来源画像"
+            "description": "any_cell | label_cell。旧名 cells/observed_cells、label_column 仍接受。缺省用来源画像"
           },
           "sigma": {
             "type": "number",
