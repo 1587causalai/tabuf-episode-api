@@ -66,8 +66,8 @@
 \setlength{\headheight}{14pt}
 \pagestyle{fancy}
 \fancyhf{}
-\lhead{\TabUF{} 数据生成活文档}
-\rhead{v0.1 \quad 2026-08-14}
+\lhead{数据生成手册（给自己看）}
+\rhead{v0.1 \quad 2026-08-15}
 \cfoot{\thepage}
 \renewcommand{\headrulewidth}{0.3pt}
 
@@ -75,18 +75,18 @@
 \setlist[itemize]{leftmargin=1.4em,itemsep=0.25em,topsep=0.3em}
 \setlist[enumerate]{leftmargin=1.6em,itemsep=0.25em,topsep=0.3em}
 
-\title{\TabUF{} 数据生成技术文档\\[0.4em]
-\large 从通道到 Episode：一篇会跟着我们一起长的说明书}
+\title{\TabUF{} 数据生成手册\\[0.4em]
+\large 给自己看的生成手册}
 \author{Heyang Gong \and 文献调研（协作草稿）}
-\date{2026 年 8 月 14 日 \quad 草稿 v0.1}
+\date{2026 年 8 月 15 日 \quad 草稿 v0.1}
 
 \begin{document}
 \maketitle
 \vspace{-1.2em}
 \begin{center}
-\textit{正文只讲逻辑。公式、默认数字、字段形状在附录。}\\[0.3em]
-{\small 仓库：\url{https://github.com/1587causalai/tabuf-episode-api}
-\quad 运输层：\texttt{docs/api.pdf}}
+\textit{坐下来钉生成语义用的。正文只讲逻辑；公式、默认数字、payload 含义在附录。}\\[0.35em]
+怎么调服务不在这里，见 \texttt{docs/api.pdf}。\\[0.35em]
+{\small 仓库：\url{https://github.com/1587causalai/tabuf-episode-api}}
 \end{center}
 
 \tableofcontents
@@ -96,13 +96,14 @@
 
 \begin{storybox}
 我们现在最缺的不是又一个网络结构，而是\textbf{可训练的 episode 从哪来}。
-正文只把逻辑钉住。HTTP 字段名、默认比例、逐列公式，都进附录。
+这篇手册是写给自己的：先把生成语义钉住，再改代码。
+怎么调服务、字段范围，都不在这里。
 \end{storybox}
 
 工作方式不变：先改这篇文档，再改代码。绿=已锁定，黄=还没锁，灰=第零版故意关掉。
 
 \begin{lockbox}
-第零版只生成\textbf{观测世界}。调用方拿到的是 episode（完整表 + 两张 mask），
+第零版只生成\textbf{观测世界}。拿到的是 episode（完整表 + 两张 mask），
 不是 DAG，也不是潜变量 $\uu_i$。
 \end{lockbox}
 
@@ -111,7 +112,7 @@
 表格基础模型的训练对象，常常被说成「一张表」。这对 \TabUF{} 不够用。
 网络真正要学的，是：\textbf{已经看见一部分格子之后，去填另一部分格子}。
 
-所以训练样本不是表，是 \textbf{episode}：一次请求返回 $n$ 条，
+所以训练样本不是表，是 \textbf{episode}：一次生成 $n$ 条，
 每条是一张完整表，外加 missing 与 query 两张 mask。
 没有单独的 $y$。真值就在完整表的 query 格子上。
 
@@ -127,10 +128,12 @@
 
 \section{来源是通道，不是 DiscoSCM 的方言}
 
-共享的只有线上信封。\texttt{source} 选生成器，默认 discoscm。
+共享的只有 episode 信封：完整表 + 两张 mask。
+通道由生成器名字区分，默认是 discoscm。
 \textbf{不要}把每一条通道都读成「先抽总体再填格子」。
 
-目录在 \texttt{GET /v0/sources}。字段名、范围、curl 在 \texttt{docs/api.pdf}。
+名字会出现在下面的解释里——discoscm、scm、sklearn、openml、recsys——
+那只是在说世界从哪来，不是在列一份调用目录。
 
 \begin{lockbox}
 各来源语义独立。信封共享，生成故事不共享。
@@ -284,7 +287,7 @@ unit-specific multinomial logit，$Y_{ij}\sim\mathrm{softmax}(\uu_i C_j^\top)$ �
 格子级。默认 $P(M)=0.05$、$P(Q)=0.15$，独立抽取，并集不必是 $20\%$。
 \texttt{query\_mode=cells}。\texttt{uses\_unit\_token=true}。
 
-\texttt{return\_mechanism} 或 \texttt{debug} 时带
+需要看生成说明时，会带
 \texttt{population}（含 \texttt{representations}）和
 \texttt{response\_law}（逐列 $g_j$ 的参数）。
 它们描述表从哪来，不是给网络的输入。形状见附录~\ref{app:payload}。
@@ -307,22 +310,22 @@ $n,d$ curriculum。每加一层先改这一附录，再改代码。
 根节点是噪声；否则父节点的线性组合或 $\tanh$，再加 $\mathcal{N}(0,\sigma^2)$。
 最后一列指定为预测目标 $y$（文献惯例：先抽 SCM，再挑一个节点来预测）。
 
-请求里的 \texttt{n\_units} 表示 $n_{\mathrm{samples}}$。
+这里的行数旋钮表示 $n_{\mathrm{samples}}$。
 \texttt{unit\_dim} / \texttt{type\_weights} / \texttt{independent\_frac} / \texttt{population}
 不适用，响应里不会出现。
 
 默认 \texttt{query\_mode=label\_column}，\texttt{missing\_frac=0}。
-\texttt{return\_mechanism} 时机制在字段 \texttt{mechanism}：
-$\{\texttt{framework},\,\texttt{edges},\,\texttt{node\_fn},\,\texttt{target\_col}\}$，
-\texttt{target\_col}= $d-1$。这是特征 DAG，不是个体响应律。
+机制在字段 \texttt{mechanism}，键为
+\texttt{framework}、\texttt{edges}、\texttt{node\_fn}、\texttt{target\_col}。
+\texttt{target\_col}=$d-1$。这是特征 DAG，不是个体响应律。
 不要读 \texttt{population} / \texttt{response\_law}。
 
 \section{sklearn 合成}
 \label{app:sksynth}
 
 行是 i.i.d.\ 样本。没有 unit token。没有 population。
-\texttt{return\_mechanism} 时 \texttt{mechanism} 带 \texttt{maker}。
-别名 \texttt{sklearn\_synthetic}+\texttt{source\_name} 仍可用；省略则随机抽一个 maker，并套用该 maker 的画像。
+机制在 \texttt{mechanism}，带 \texttt{maker}。
+别名仍可用：省略子名则随机抽一个 maker，并套用该 maker 的画像。
 
 \subsection{sklearn\_make\_classification}
 最后一列二值 $y$。默认 label\_column，missing $0$。
@@ -343,22 +346,22 @@ Friedman \#1。最后一列连续 $y$。默认 label\_column，missing $0$。
 对原表按请求的行数、列数子采样，保留最后一列。
 默认 label\_column，missing $0$。
 
-\texttt{sklearn\_iris} / \texttt{sklearn\_wine} / \texttt{sklearn\_breast\_cancer}：最后一列类别。
+\texttt{sklearn\_iris}、\texttt{sklearn\_wine}、\texttt{sklearn\_breast\_cancer}：最后一列类别。
 \texttt{sklearn\_diabetes}：最后一列连续靶。
-别名 \texttt{sklearn\_real}+\texttt{source\_name}。
+别名套用被抽中的真实表。
 
 \section{OpenML 占位}
 \label{app:openml}
 
 监督表。行是 \texttt{entity\_row}。默认 label\_column，missing $0$。
-缓存接上之前返回 501。不要用 DiscoSCM 的词描述它。
+缓存接上之前这条通道还不能出表。不要用 DiscoSCM 的词描述它。
 
 \section{推荐占位}
 \label{app:recsys}
 
-User$\times$Item。行含义是 \texttt{user}。
-未观测格是 missing；query 是已观测评分的子集（\texttt{observed\_cells}）。
-缓存接上之前返回 501。
+User$\times$Item 矩阵。行含义是 \texttt{user}。
+未观测格是 missing；query 是已观测评分的子集（模式 \texttt{observed\_cells}）。
+缓存接上之前这条通道还不能出表。
 
 \section{各来源默认 mask}
 \label{app:masks}
@@ -382,12 +385,14 @@ recsys & user & observed\_cells & 未观测 & 已观测的 $0.15$ \\
 }
 
 请求里写了 missing / query / query\_mode 则覆盖画像。
-\texttt{n\_units} 一律是行数旋钮。
+行数旋钮一律控制行数；只有 discoscm 把这些行当成 unit。
 
 \section{机制 payload 形状}
 \label{app:payload}
 
-discoscm 在 \texttt{return\_mechanism} 或 \texttt{debug} 时给两块：
+线上字段名以 \texttt{docs/api.pdf} 为准。这里只讲含义：这些块描述表从哪来，不是网络输入。
+
+discoscm 在需要看生成说明时给两块：
 \texttt{population} 含 \texttt{id}、\texttt{n\_units}、\texttt{unit\_dim}、
 \texttt{prior}、\texttt{representations}（行 $i$ 是 $u_i$）；
 \texttt{response\_law} 含 \texttt{form}、\texttt{type\_weights}、
