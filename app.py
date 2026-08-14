@@ -12,9 +12,12 @@ from generator import sample_episodes
 VERSION = "v0"
 
 DESCRIPTION = """
-一次返回 n 条 episode，每条自己抽一个总体。
+一次返回 n 条表 episode。source 选择生成器，默认 discoscm。
 
-默认 source=discoscm。也可 sklearn_synthetic / sklearn_real / scm；openml 与 recsys 已占位。
+各来源语义不同：只有 discoscm 把行当成带潜变量的 unit。
+其它来源（scm / sklearn_* / openml / recsys）各有自己的行含义。
+共享的只是线上信封：完整 values + missing_mask + query_mask。
+目录见 GET /v0/sources。
 """
 
 app = FastAPI(
@@ -44,25 +47,30 @@ class TypeWeights(BaseModel):
 
 
 class EpisodeRequest(BaseModel):
-    n_units: int = Field(default=64, ge=8, le=512, examples=[16])
+    n_units: int = Field(default=64, ge=8, le=512, examples=[16], description="行数旋钮。只有 discoscm 把行解释成 unit；scm/sklearn 里是 n_samples")
     n_features: int = Field(default=8, ge=2, le=64, examples=[8])
-    unit_dim: int = Field(default=4, ge=1, le=32, examples=[4])
+    unit_dim: int = Field(default=4, ge=1, le=32, examples=[4], description="discoscm-only：个体表征维 k。其它来源忽略")
     query_frac: float | None = Field(default=None, description="缺省则用来源画像默认")
     missing_frac: float | None = Field(default=None, description="缺省则用来源画像默认")
     query_mode: str | None = Field(default=None, description="cells | label_column | observed_cells；缺省用来源画像")
     sigma: float = Field(default=0.3, ge=0.0, le=10.0)
     seed: int | None = Field(default=0)
     n_episodes: int = Field(default=1, ge=1)
-    type_weights: TypeWeights = Field(default_factory=TypeWeights, description="列类型抽样权重，不必归一化")
-    independent_frac: float = Field(default=0.05, ge=0.0, le=1.0, description="每列与其它特征独立的概率")
+    type_weights: TypeWeights = Field(default_factory=TypeWeights, description="discoscm-only：列类型抽样权重，不必归一化")
+    independent_frac: float = Field(default=0.05, ge=0.0, le=1.0, description="discoscm-only：每列与其它特征独立的概率")
     source: str = Field(
         default="discoscm",
-        description="discoscm | sklearn_synthetic | sklearn_real | scm | openml | recsys",
+        description=(
+            "canonical: discoscm | scm | sklearn_make_classification | sklearn_make_regression "
+            "| sklearn_friedman1 | sklearn_low_rank | sklearn_iris | sklearn_wine "
+            "| sklearn_breast_cancer | sklearn_diabetes | openml | recsys. "
+            "aliases: sklearn_synthetic | sklearn_real (+ source_name)"
+        ),
         examples=["discoscm"],
     )
     source_name: str | None = Field(
         default=None,
-        description="子名称：make_classification / iris / OpenML id 等。缺省则该 source 内随机抽。",
+        description="别名用的子名称：make_classification / iris / OpenML id 等。canonical 名已自带，此项忽略。",
     )
     return_mechanism: bool = Field(default=False)
     debug: bool = Field(default=False)
@@ -84,7 +92,9 @@ class TableShapes(BaseModel):
 
 class Table(BaseModel):
     n_units: int
+    n_rows: int | None = None
     n_features: int
+    source: str | None = None
     values: list[list[float | int]]
     missing_mask: list[list[bool]]
     query_mask: list[list[bool]]
@@ -99,6 +109,7 @@ class Episode(BaseModel):
     table: Table
     population: dict[str, Any] | None = None
     response_law: dict[str, Any] | None = None
+    mechanism: dict[str, Any] | None = None
     S: list[list[float]] | None = None
 
 

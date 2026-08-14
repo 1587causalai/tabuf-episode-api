@@ -1,4 +1,10 @@
-"""Pluggable priors that all compile into the same episode table contract."""
+"""Pluggable priors that all compile into the same episode table contract.
+
+The shared contract is the WIRE envelope only: a complete table plus
+missing_mask and query_mask. Each source has its own row semantics.
+DiscoSCM language (units, population, response_law) applies ONLY to
+source=discoscm.
+"""
 
 from __future__ import annotations
 
@@ -8,71 +14,226 @@ import numpy as np
 
 from generator import _json_bool_grid, DEFAULT_MISSING_FRAC, DEFAULT_QUERY_FRAC
 
-SOURCES = (
+SKLEARN_SYNTH_CANONICAL = {
+    "sklearn_make_classification": "make_classification",
+    "sklearn_make_regression": "make_regression",
+    "sklearn_friedman1": "make_friedman1",
+    "sklearn_low_rank": "make_low_rank_matrix",
+}
+SKLEARN_SYNTH_MAKER_TO_SOURCE = {v: k for k, v in SKLEARN_SYNTH_CANONICAL.items()}
+
+SKLEARN_REAL_CANONICAL = {
+    "sklearn_iris": "iris",
+    "sklearn_wine": "wine",
+    "sklearn_breast_cancer": "breast_cancer",
+    "sklearn_diabetes": "diabetes",
+}
+SKLEARN_REAL_DS_TO_SOURCE = {v: k for k, v in SKLEARN_REAL_CANONICAL.items()}
+
+SKLEARN_REAL = ("iris", "wine", "breast_cancer", "diabetes")
+
+CANONICAL_SOURCES = (
     "discoscm",
-    "sklearn_synthetic",
-    "sklearn_real",
     "scm",
+    *SKLEARN_SYNTH_CANONICAL.keys(),
+    *SKLEARN_REAL_CANONICAL.keys(),
     "openml",
     "recsys",
 )
 
-SKLEARN_REAL = ("iris", "wine", "breast_cancer", "diabetes")
+ALIAS_SOURCES = ("sklearn_synthetic", "sklearn_real")
 
-# Per-source default compiler policy. query_mode:
-#   cells          — random cells (DiscoSCM / feature SCM)
-#   label_column   — last column is the task label; query that whole column
-#   observed_cells — recsys: query a subset of observed ratings (placeholder)
+SOURCES = CANONICAL_SOURCES + ALIAS_SOURCES
+
+_SHARED = (
+    "n_units",
+    "n_features",
+    "seed",
+    "n_episodes",
+    "source",
+    "missing_frac",
+    "query_frac",
+    "query_mode",
+    "return_mechanism",
+)
+_DISCOSCM_ONLY = ("unit_dim", "type_weights", "independent_frac")
+_SIGMA = ("sigma",)
+_DEBUG = ("debug",)
+_SOURCE_NAME = ("source_name",)
+
+
+def _rf(used: tuple[str, ...] | list[str], ignored: tuple[str, ...] | list[str]) -> dict[str, list[str]]:
+    return {
+        "request_fields_used": list(used),
+        "request_fields_ignored": list(ignored),
+    }
+
+
+_SKLEARN_USED = _SHARED
+_SKLEARN_IGNORED = _DISCOSCM_ONLY + _SIGMA + _DEBUG + _SOURCE_NAME
+_ALIAS_USED = _SHARED + _SOURCE_NAME
+_ALIAS_IGNORED = _DISCOSCM_ONLY + _SIGMA + _DEBUG
+_PLACEHOLDER_USED = _SHARED + _SOURCE_NAME
+_PLACEHOLDER_IGNORED = _DISCOSCM_ONLY + _SIGMA + _DEBUG
+
 SOURCE_PROFILES: dict[str, dict[str, Any]] = {
     "discoscm": {
         "status": "ready",
-        "task": "grid",
+        "family": "discoscm",
+        "row_meaning": "unit",
         "query_mode": "cells",
-        "query_frac": 0.15,
-        "missing_frac": 0.05,
-        "note": "Unit-specific response law. Default cell-wise C/Q.",
-    },
-    "sklearn_synthetic": {
-        "status": "ready",
-        "task": "supervised",
-        "query_mode": "label_column",
-        "query_frac": None,
-        "missing_frac": 0.0,
-        "note": "Last column is y. Default query is the label column.",
-        "makers": ["make_classification", "make_regression", "make_friedman1", "make_low_rank_matrix"],
-    },
-    "sklearn_real": {
-        "status": "ready",
-        "task": "supervised",
-        "query_mode": "label_column",
-        "query_frac": None,
-        "missing_frac": 0.0,
-        "note": "Bundled sklearn tables. Default query is the label column.",
-        "datasets": list(SKLEARN_REAL),
+        "query_frac": DEFAULT_QUERY_FRAC,
+        "missing_frac": DEFAULT_MISSING_FRAC,
+        "uses_unit_token": True,
+        **_rf(_SHARED + _DISCOSCM_ONLY + _SIGMA + _DEBUG, _SOURCE_NAME),
+        "note": "Rows are units with latent u_i; cell-wise missing/query; unit-specific response law. See data-generation.pdf.",
     },
     "scm": {
         "status": "ready",
-        "task": "grid",
-        "query_mode": "cells",
-        "query_frac": 0.15,
-        "missing_frac": 0.05,
-        "note": "Paper-style feature ANM. Rows i.i.d. Default cell-wise masks.",
-    },
-    "openml": {
-        "status": "placeholder",
-        "task": "supervised",
+        "family": "scm",
+        "row_meaning": "iid_sample",
         "query_mode": "label_column",
         "query_frac": None,
         "missing_frac": 0.0,
-        "note": "OpenML clf/reg. Same contract as sklearn_real once cached.",
+        "uses_unit_token": False,
+        **_rf(_SHARED + _SIGMA, _DISCOSCM_ONLY + _DEBUG + _SOURCE_NAME),
+        "note": "i.i.d. rows from a random additive-noise DAG over features; last column is the prediction target.",
+    },
+    "sklearn_make_classification": {
+        "status": "ready",
+        "family": "sklearn_synthetic",
+        "row_meaning": "iid_sample",
+        "query_mode": "label_column",
+        "query_frac": None,
+        "missing_frac": 0.0,
+        "uses_unit_token": False,
+        **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
+        "note": "sklearn make_classification; last column is binary y; no missing by default.",
+    },
+    "sklearn_make_regression": {
+        "status": "ready",
+        "family": "sklearn_synthetic",
+        "row_meaning": "iid_sample",
+        "query_mode": "label_column",
+        "query_frac": None,
+        "missing_frac": 0.0,
+        "uses_unit_token": False,
+        **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
+        "note": "sklearn make_regression; last column is continuous y; no missing by default.",
+    },
+    "sklearn_friedman1": {
+        "status": "ready",
+        "family": "sklearn_synthetic",
+        "row_meaning": "iid_sample",
+        "query_mode": "label_column",
+        "query_frac": None,
+        "missing_frac": 0.0,
+        "uses_unit_token": False,
+        **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
+        "note": "sklearn Friedman #1; last column is continuous y; no missing by default.",
+    },
+    "sklearn_low_rank": {
+        "status": "ready",
+        "family": "sklearn_synthetic",
+        "row_meaning": "iid_sample",
+        "query_mode": "cells",
+        "query_frac": DEFAULT_QUERY_FRAC,
+        "missing_frac": DEFAULT_MISSING_FRAC,
+        "uses_unit_token": False,
+        **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
+        "note": "sklearn low-rank matrix; no designated label; cell-wise missing/query like matrix completion.",
+    },
+    "sklearn_iris": {
+        "status": "ready",
+        "family": "sklearn_real",
+        "row_meaning": "entity_row",
+        "query_mode": "label_column",
+        "query_frac": None,
+        "missing_frac": 0.0,
+        "uses_unit_token": False,
+        **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
+        "note": "Bundled iris table; last column is the class label.",
+    },
+    "sklearn_wine": {
+        "status": "ready",
+        "family": "sklearn_real",
+        "row_meaning": "entity_row",
+        "query_mode": "label_column",
+        "query_frac": None,
+        "missing_frac": 0.0,
+        "uses_unit_token": False,
+        **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
+        "note": "Bundled wine table; last column is the class label.",
+    },
+    "sklearn_breast_cancer": {
+        "status": "ready",
+        "family": "sklearn_real",
+        "row_meaning": "entity_row",
+        "query_mode": "label_column",
+        "query_frac": None,
+        "missing_frac": 0.0,
+        "uses_unit_token": False,
+        **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
+        "note": "Bundled breast_cancer table; last column is the class label.",
+    },
+    "sklearn_diabetes": {
+        "status": "ready",
+        "family": "sklearn_real",
+        "row_meaning": "entity_row",
+        "query_mode": "label_column",
+        "query_frac": None,
+        "missing_frac": 0.0,
+        "uses_unit_token": False,
+        **_rf(_SKLEARN_USED, _SKLEARN_IGNORED),
+        "note": "Bundled diabetes table; last column is the continuous target.",
+    },
+    "sklearn_synthetic": {
+        "status": "ready",
+        "family": "sklearn_synthetic",
+        "row_meaning": "iid_sample",
+        "query_mode": "label_column",
+        "query_frac": None,
+        "missing_frac": 0.0,
+        "uses_unit_token": False,
+        **_rf(_ALIAS_USED, _ALIAS_IGNORED),
+        "note": "Alias: pass source_name to pick a maker, or one is drawn at random. Per-maker masks follow the canonical profile.",
+        "makers": list(SKLEARN_SYNTH_CANONICAL.values()),
+        "alias_of": list(SKLEARN_SYNTH_CANONICAL.keys()),
+    },
+    "sklearn_real": {
+        "status": "ready",
+        "family": "sklearn_real",
+        "row_meaning": "entity_row",
+        "query_mode": "label_column",
+        "query_frac": None,
+        "missing_frac": 0.0,
+        "uses_unit_token": False,
+        **_rf(_ALIAS_USED, _ALIAS_IGNORED),
+        "note": "Alias: pass source_name to pick a bundled table, or one is drawn at random.",
+        "datasets": list(SKLEARN_REAL),
+        "alias_of": list(SKLEARN_REAL_CANONICAL.keys()),
+    },
+    "openml": {
+        "status": "placeholder",
+        "family": "openml",
+        "row_meaning": "entity_row",
+        "query_mode": "label_column",
+        "query_frac": None,
+        "missing_frac": 0.0,
+        "uses_unit_token": False,
+        **_rf(_PLACEHOLDER_USED, _PLACEHOLDER_IGNORED),
+        "note": "OpenML classification/regression tables; last column is the label; returns 501 until cached.",
     },
     "recsys": {
         "status": "placeholder",
-        "task": "ratings",
+        "family": "recsys",
+        "row_meaning": "user",
         "query_mode": "observed_cells",
-        "query_frac": 0.15,
+        "query_frac": DEFAULT_QUERY_FRAC,
         "missing_frac": 0.0,
-        "note": "User x item ratings. Query a subset of observed entries; unobserved stay missing.",
+        "uses_unit_token": False,
+        **_rf(_PLACEHOLDER_USED, _PLACEHOLDER_IGNORED),
+        "note": "User×Item ratings; unobserved entries are missing; query is a subset of observed ratings; returns 501 until cached.",
     },
 }
 
@@ -86,7 +247,9 @@ def resolve_profile(
 ) -> dict[str, Any]:
     src = (source or "discoscm").lower()
     if src not in SOURCE_PROFILES:
-        raise ValueError("unknown source %r" % src)
+        raise ValueError(
+            "unknown source %r; use %s" % (src, ", ".join(CANONICAL_SOURCES))
+        )
     base = dict(SOURCE_PROFILES[src])
     if query_mode:
         base["query_mode"] = query_mode
@@ -97,7 +260,7 @@ def resolve_profile(
     if base.get("missing_frac") is None:
         base["missing_frac"] = 0.0
     if base.get("query_frac") is None:
-        base["query_frac"] = 0.15
+        base["query_frac"] = DEFAULT_QUERY_FRAC
     return base
 
 
@@ -120,7 +283,6 @@ def _masks(
     if mode == "label_column":
         query_mask[:, -1] = True
     elif mode == "observed_cells":
-        # Placeholder behaviour: same as cells, until recsys cache exists.
         n_query = max(1, min(int(round(float(query_frac) * n_cells)), n_cells))
         query_flat = np.zeros(n_cells, dtype=bool)
         query_flat[rng.choice(n_cells, size=n_query, replace=False)] = True
@@ -145,6 +307,8 @@ def pack_grid(
     return_mechanism: bool,
     mechanism: dict[str, Any] | None,
     query_mode: str = "cells",
+    source: str | None = None,
+    mechanism_field: str = "mechanism",
 ) -> dict[str, Any]:
     n, d = int(Y.shape[0]), int(Y.shape[1])
     missing_mask, query_mask = _masks(rng, n, d, missing_frac, query_frac, query_mode)
@@ -157,6 +321,7 @@ def pack_grid(
         values.append(row)
     table = {
         "n_units": n,
+        "n_rows": n,
         "n_features": d,
         "values": values,
         "missing_mask": _json_bool_grid(missing_mask),
@@ -172,10 +337,11 @@ def pack_grid(
             "n_query_and_missing": int((query_mask & missing_mask).sum()),
         },
         "query_mode": query_mode,
+        "source": source,
     }
     payload: dict[str, Any] = {"seed": seed, "table": table}
     if return_mechanism and mechanism is not None:
-        payload["response_law"] = mechanism
+        payload[mechanism_field] = mechanism
     return payload
 
 
@@ -211,6 +377,7 @@ def sklearn_synthetic(
     return_mechanism: bool,
     source_name: str | None = None,
     query_mode: str = "label_column",
+    source: str | None = None,
 ) -> dict[str, Any]:
     from sklearn.datasets import (
         make_classification,
@@ -256,13 +423,14 @@ def sklearn_synthetic(
         Y = make_low_rank_matrix(n_samples=n, n_features=d, random_state=rs)
         types = ["numeric"] * d
         n_classes = [None] * d
-    mech = {"framework": "sklearn_synthetic", "maker": name, "note": "Rows are i.i.d. draws, not DiscoSCM units."}
+    source_key = source or SKLEARN_SYNTH_MAKER_TO_SOURCE.get(name, "sklearn_synthetic")
+    mech = {"framework": "sklearn_synthetic", "maker": name}
     return pack_grid(
         np.asarray(Y, dtype=np.float64), rng,
         missing_frac=missing_frac, query_frac=query_frac,
         column_types=types, n_classes=n_classes, seed=seed,
         return_mechanism=return_mechanism, mechanism=mech,
-        query_mode=query_mode,
+        query_mode=query_mode, source=source_key,
     )
 
 
@@ -277,6 +445,7 @@ def sklearn_real(
     return_mechanism: bool,
     source_name: str | None = None,
     query_mode: str = "label_column",
+    source: str | None = None,
 ) -> dict[str, Any]:
     from sklearn.datasets import load_breast_cancer, load_diabetes, load_iris, load_wine
 
@@ -296,18 +465,18 @@ def sklearn_real(
     Y = _fit_supervised(Y0, n_units, n_features, rng)
     types = ["numeric"] * n_features
     n_classes: list[int | None] = [None] * n_features
+    source_key = source or SKLEARN_REAL_DS_TO_SOURCE.get(name, "sklearn_real")
     mech = {
         "framework": "sklearn_real",
         "dataset": name,
         "n_rows_original": int(Y0.shape[0]),
         "n_cols_original": int(Y0.shape[1]),
-        "note": "Real table subsampled into Unit x Feature grid. No unit-specific law.",
     }
     return pack_grid(
         Y, rng, missing_frac=missing_frac, query_frac=query_frac,
         column_types=types, n_classes=n_classes, seed=seed,
         return_mechanism=return_mechanism, mechanism=mech,
-        query_mode=query_mode,
+        query_mode=query_mode, source=source_key,
     )
 
 
@@ -321,9 +490,14 @@ def scm_anm(
     seed: int | None,
     return_mechanism: bool,
     sigma: float,
-    query_mode: str = "cells",
+    query_mode: str = "label_column",
+    source: str | None = None,
 ) -> dict[str, Any]:
-    """Paper-style additive-noise SCM: i.i.d. rows from a random DAG."""
+    """Additive-noise SCM: i.i.d. rows from a random DAG over features.
+
+    Last column is the designated prediction target (literature: sample an
+    SCM, then pick a node to predict). Rows are observational draws, not units.
+    """
     n, d = int(n_units), int(n_features)
     X = np.zeros((n, d), dtype=np.float64)
     edges: list[list[int]] = []
@@ -349,15 +523,15 @@ def scm_anm(
             edges.append([int(p), j])
     mech = {
         "framework": "ANM-SCM",
-        "note": "TabPFN/TabICL-style feature SCM. Rows are i.i.d.; nodes are features, not units.",
         "edges": edges,
         "node_fn": node_fn,
+        "target_col": d - 1,
     }
     return pack_grid(
         X, rng, missing_frac=missing_frac, query_frac=query_frac,
         column_types=["numeric"] * d, n_classes=[None] * d, seed=seed,
         return_mechanism=return_mechanism, mechanism=mech,
-        query_mode=query_mode,
+        query_mode=query_mode, source=source or "scm",
     )
 
 

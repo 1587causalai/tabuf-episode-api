@@ -1,8 +1,10 @@
-"""Observational v0 TabUF episode generator (DiscoSCM-aligned).
+"""Observational v0 TabUF episode generator.
 
-Column types are drawn i.i.d. with weights 70/5/10/5/5
+DiscoSCM (default source) draws column types i.i.d. with weights 70/5/10/5/5
 (numeric, ordinal, binary, categorical, high_cardinality), then normalized.
 Each column is independently independent-of-rest with probability 0.05.
+Other sources (scm, sklearn_*, openml, recsys) have their own semantics;
+see sources.SOURCE_PROFILES. The shared contract is the table wire only.
 """
 
 from __future__ import annotations
@@ -233,7 +235,9 @@ def sample_episode(
 
     table: dict[str, Any] = {
         "n_units": n,
+        "n_rows": n,
         "n_features": d,
+        "source": "discoscm",
         "values": values,
         "missing_mask": _json_bool_grid(missing_mask),
         "query_mask": _json_bool_grid(query_mask),
@@ -247,6 +251,7 @@ def sample_episode(
             "n_query": int(query_mask.sum()),
             "n_query_and_missing": int((query_mask & missing_mask).sum()),
         },
+        "query_mode": "cells",
     }
     payload: dict[str, Any] = {"seed": seed, "table": table}
 
@@ -292,24 +297,64 @@ def sample_episodes(
         base = int(np.random.default_rng().integers(0, 2**31 - 1))
     else:
         base = int(seed)
-    from sources import resolve_profile
-    prof = resolve_profile(source, query_mode=query_mode, missing_frac=missing_frac, query_frac=query_frac)
-    missing_frac = float(prof["missing_frac"])
-    query_frac = float(prof["query_frac"])
-    qmode = str(prof["query_mode"])
+    from sources import (
+        CANONICAL_SOURCES,
+        SKLEARN_REAL_CANONICAL,
+        SKLEARN_REAL_DS_TO_SOURCE,
+        SKLEARN_SYNTH_CANONICAL,
+        SKLEARN_SYNTH_MAKER_TO_SOURCE,
+        SOURCES,
+        openml_table,
+        recsys_table,
+        resolve_profile,
+        scm_anm,
+        sklearn_real,
+        sklearn_synthetic,
+    )
+    src = (source or "discoscm").lower()
+    if src not in SOURCES:
+        raise ValueError(
+            "unknown source %r; use %s" % (src, ", ".join(CANONICAL_SOURCES))
+        )
     episodes: list[dict[str, Any]] = []
     for e in range(n_episodes):
         ep_seed = base + e
         rng = np.random.default_rng(ep_seed)
-        src = (source or "discoscm").lower()
-        if src == "discoscm":
+        resolved_src = src
+        resolved_name = source_name
+        if src == "sklearn_synthetic":
+            makers = list(SKLEARN_SYNTH_CANONICAL.values())
+            resolved_name = source_name or str(rng.choice(makers))
+            if resolved_name not in SKLEARN_SYNTH_MAKER_TO_SOURCE:
+                raise ValueError("unknown sklearn synthetic maker: %s" % resolved_name)
+            resolved_src = SKLEARN_SYNTH_MAKER_TO_SOURCE[resolved_name]
+        elif src == "sklearn_real":
+            datasets = list(SKLEARN_REAL_CANONICAL.values())
+            resolved_name = source_name or str(rng.choice(datasets))
+            if resolved_name not in SKLEARN_REAL_DS_TO_SOURCE:
+                raise ValueError("unknown sklearn real dataset: %s" % resolved_name)
+            resolved_src = SKLEARN_REAL_DS_TO_SOURCE[resolved_name]
+        elif src in SKLEARN_SYNTH_CANONICAL:
+            resolved_name = SKLEARN_SYNTH_CANONICAL[src]
+        elif src in SKLEARN_REAL_CANONICAL:
+            resolved_name = SKLEARN_REAL_CANONICAL[src]
+        prof = resolve_profile(
+            resolved_src,
+            query_mode=query_mode,
+            missing_frac=missing_frac,
+            query_frac=query_frac,
+        )
+        mf = float(prof["missing_frac"])
+        qf = float(prof["query_frac"])
+        qmode = str(prof["query_mode"])
+        if resolved_src == "discoscm":
             ep = sample_episode(
                 rng,
                 n_units=n_units,
                 n_features=n_features,
                 unit_dim=unit_dim,
-                query_frac=query_frac,
-                missing_frac=missing_frac,
+                query_frac=qf,
+                missing_frac=mf,
                 sigma=sigma,
                 column_normalize=column_normalize,
                 debug=debug,
@@ -319,27 +364,27 @@ def sample_episodes(
                 independent_frac=independent_frac,
             )
         else:
-            from sources import sklearn_synthetic, sklearn_real, scm_anm, openml_table, recsys_table
             kw = dict(
                 rng=rng, n_units=n_units, n_features=n_features,
-                missing_frac=missing_frac, query_frac=query_frac,
+                missing_frac=mf, query_frac=qf,
                 seed=ep_seed, return_mechanism=return_mechanism,
-                query_mode=qmode,
+                query_mode=qmode, source=resolved_src,
             )
-            if src == "sklearn_synthetic":
-                ep = sklearn_synthetic(source_name=source_name, **kw)
-            elif src == "sklearn_real":
-                ep = sklearn_real(source_name=source_name, **kw)
-            elif src == "scm":
+            if resolved_src in SKLEARN_SYNTH_CANONICAL:
+                ep = sklearn_synthetic(source_name=resolved_name, **kw)
+            elif resolved_src in SKLEARN_REAL_CANONICAL:
+                ep = sklearn_real(source_name=resolved_name, **kw)
+            elif resolved_src == "scm":
                 ep = scm_anm(sigma=sigma, **kw)
-            elif src == "openml":
+            elif resolved_src == "openml":
                 ep = openml_table(source_name=source_name, **kw)
-            elif src == "recsys":
+            elif resolved_src == "recsys":
                 ep = recsys_table(source_name=source_name, **kw)
             else:
                 raise ValueError(
-                    "unknown source %r; use discoscm, sklearn_synthetic, sklearn_real, scm, openml, recsys"
-                    % src
+                    "unknown source %r; use %s" % (src, ", ".join(CANONICAL_SOURCES))
                 )
+            ep.pop("population", None)
+            ep.pop("response_law", None)
         episodes.append(ep)
     return episodes

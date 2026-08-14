@@ -84,8 +84,18 @@ def test_scm_has_edges_when_mechanism_on():
         n_units=16, n_features=6, n_episodes=1, seed=1,
         source="scm", return_mechanism=True,
     )[0]
-    assert ep["response_law"]["framework"] == "ANM-SCM"
-    assert "edges" in ep["response_law"]
+    assert "population" not in ep
+    assert "response_law" not in ep
+    mech = ep["mechanism"]
+    assert mech["framework"] == "ANM-SCM"
+    assert "edges" in mech
+    assert "node_fn" in mech
+    assert mech["target_col"] == 5
+    q = ep["table"]["query_mask"]
+    assert all(row[-1] for row in q)
+    assert ep["table"].get("query_mode") == "label_column"
+    blob = str(mech)
+    assert "unit" not in blob.lower()
 
 def test_sklearn_real_iris():
     ep = sample_episodes(
@@ -104,3 +114,45 @@ def test_sklearn_real_queries_label_column():
     q = ep["table"]["query_mask"]
     assert all(row[-1] for row in q)
     assert ep["table"].get("query_mode") == "label_column"
+
+def test_sklearn_iris_canonical_source():
+    ep = sample_episodes(
+        n_units=30, n_features=4, n_episodes=1, seed=0,
+        source="sklearn_iris",
+    )[0]
+    assert ep["table"]["n_features"] == 4
+    assert ep["table"].get("source") == "sklearn_iris"
+    q = ep["table"]["query_mask"]
+    assert all(row[-1] for row in q)
+    assert ep["table"].get("query_mode") == "label_column"
+    assert "population" not in ep
+
+
+def test_sklearn_make_classification_label_column():
+    ep = sample_episodes(
+        n_units=24, n_features=6, n_episodes=1, seed=0,
+        source="sklearn_make_classification", return_mechanism=True,
+    )[0]
+    q = ep["table"]["query_mask"]
+    assert all(row[-1] for row in q)
+    assert ep["table"].get("query_mode") == "label_column"
+    assert ep["table"]["column_types"][-1] == "binary"
+    assert ep["table"]["n_classes"][-1] == 2
+    assert "population" not in ep
+    assert "response_law" not in ep
+    assert ep["mechanism"]["maker"] == "make_classification"
+
+
+def test_sklearn_low_rank_is_cellwise_not_supervised():
+    ep = sample_episodes(
+        n_units=20, n_features=8, n_episodes=1, seed=2,
+        source="sklearn_low_rank",
+    )[0]
+    assert ep["table"].get("query_mode") == "cells"
+    q = ep["table"]["query_mask"]
+    # not the whole last column
+    assert not all(row[-1] for row in q)
+    n_cells = 20 * 8
+    assert ep["table"]["shapes"]["n_missing"] == round(0.05 * n_cells)
+    assert ep["table"]["shapes"]["n_query"] == round(0.15 * n_cells)
+

@@ -37,6 +37,7 @@
 \rhead{v0 \quad 2026-08-14}
 \cfoot{\thepage}
 \setstretch{1.15}
+\setlist[itemize]{leftmargin=1.4em,itemsep=0.25em,topsep=0.3em}
 
 \title{TabUF Episode API 接口文档\\[0.3em]\large 第零版观测数据服务}
 \author{仓库 \texttt{1587causalai/tabuf-episode-api}}
@@ -49,261 +50,96 @@
 
 \section{这份文档管什么}
 
-生成语义（总体、unit-specific 响应律、C/Q 出题）写在
-\texttt{docs/data-generation.pdf}。
-\textbf{这份文档只写运输层}：地址、方法、字段、状态码、例子。
-字段名可以改，改的时候先改生成文档，再改这里，再改代码。
+运输层。生成数学不在这里。
 
-交互式文档由 FastAPI 自动生成，和本文同步：
+\texttt{POST /v0/episodes} 返回 $n$ 条 episode。共享的只有信封：完整表
+\texttt{values}，外加 \texttt{missing\_mask} / \texttt{query\_mask}。
+没有单独的 $y$。真值就在 \texttt{values} 里。
 
+各 \texttt{source} 是不同通道，不是 DiscoSCM 的变体。
+DiscoSCM 公式见 \texttt{docs/data-generation.pdf} 附录~A。
+其它通道的语义在那份文档的附录 B--F；本文只写字段归属和怎么调。
+默认数字、JSON 样例、字段表，全部在本文附录，不进正文。
+
+机器可读对照：\texttt{/docs}、\texttt{/redoc}、\texttt{/openapi.json}、
+\texttt{GET /v0/sources}。
+
+\section{信封}
+
+一次请求要 $n_{\mathrm{ep}}$ 张表，\texttt{source} 选生成器，默认 \texttt{discoscm}。
+
+每条 episode 有一张完整表。Compiler 只盖两张独立的 mask，不改格子上的数。
+\texttt{n\_units} 在线上是行数旋钮：只有 discoscm 把行当成 unit；
+scm / sklearn 里它就是样本数。
+
+训练只吃 \texttt{table}。不要把 \texttt{population}、\texttt{response\_law} 或
+\texttt{mechanism} 喂进网络。
+
+\section{字段分家}
+
+请求里有两类字段。
+
+\textbf{共享}（所有来源都认）：行数 \texttt{n\_units}、列数 \texttt{n\_features}、
+\texttt{seed}、\texttt{n\_episodes}、\texttt{source}、缺失/query 比例与
+\texttt{query\_mode}、\texttt{return\_mechanism}。
+别名还认 \texttt{source\_name}。
+
+\textbf{只对 discoscm 生效}：\texttt{unit\_dim}、\texttt{type\_weights}、
+\texttt{independent\_frac}、\texttt{debug}。
+其它来源静默忽略。\texttt{sigma} 只对 discoscm 与 scm 有噪声含义。
+
+\texttt{return\_mechanism=true} 时，字段名看来源：
+discoscm 给 \texttt{population}+\texttt{response\_law}；
+scm / sklearn 给 \texttt{mechanism}，\textbf{不会}带 population / response\_law。
+不要在 scm 上读 DiscoSCM 的块。
+
+完整范围表见附录~\ref{app:fields}。
+
+\section{来源是通道，不是方言}
+
+canonical 名：
+\texttt{discoscm}，
+\texttt{scm}，
+\texttt{sklearn\_make\_classification}，
+\texttt{sklearn\_make\_regression}，
+\texttt{sklearn\_friedman1}，
+\texttt{sklearn\_low\_rank}，
+\texttt{sklearn\_iris}，
+\texttt{sklearn\_wine}，
+\texttt{sklearn\_breast\_cancer}，
+\texttt{sklearn\_diabetes}，
+\texttt{openml}，
+\texttt{recsys}。
+
+别名 \texttt{sklearn\_synthetic} / \texttt{sklearn\_real} 仍可用。
+目录、行含义、默认 mask：\texttt{GET /v0/sources}，表在附录~\ref{app:masks}。
+
+一句话归属（细节不在正文）：
 \begin{itemize}
-  \item Swagger UI：\texttt{/docs}
-  \item ReDoc：\texttt{/redoc}
-  \item OpenAPI JSON：\texttt{/openapi.json}
+  \item discoscm：行是 unit，有 $u_i$。机制字段是 population / response\_law。
+  \item scm：特征 DAG 上的 i.i.d.\ 行，无 unit token，最后一列是预测目标。机制是 DAG。
+  \item sklearn 合成 / 真实表：i.i.d.\ 或实体行。多数最后一列是标签；low\_rank 没有标签。
+  \item openml / recsys：占位，501。
 \end{itemize}
 
-\section{服务地址}
-
-当前部署在文献调研这台机器上，本机回环 + 一条临时公网隧道。
+\section{端点}
 
 \begin{center}
-\begin{tabular}{@{}ll@{}}
+\begin{tabular}{@{}lll@{}}
 \toprule
-角色 & URL \\
+方法 & 路径 & 作用 \\
 \midrule
-本机 & \url{http://127.0.0.1:8787} \\
-公网隧道（会变） & \url{https://spotlight-predicted-heaven-clips.trycloudflare.com} \\
+\texttt{GET}  & \texttt{/health} & 存活 \\
+\texttt{GET}  & \texttt{/v0/sources} & 来源目录 \\
+\texttt{POST} & \texttt{/v0/episodes} & 抽 episode \\
+\texttt{GET}  & \texttt{/docs} \quad \texttt{/redoc} \quad \texttt{/openapi.json} & schema \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\begin{notebox}
-隧道是 Cloudflare Quick Tunnel，没有 SLA，URL 在进程重启后会换。
-稳定入口始终是本机 \texttt{127.0.0.1:8787}。
-无鉴权、无 HTTPS 终止以外的证书、无速率配额（单次最多 32 episode，格子上限见下表）。
-\end{notebox}
-
-\section{约定}
-
-\begin{itemize}
-  \item 协议：HTTP/1.1，JSON，UTF-8。
-  \item \texttt{Content-Type: application/json}。
-  \item 无认证头。
-  \item 时间：无时钟字段。可复现性靠 \texttt{seed}。
-  \item 浮点：IEEE-754 JSON number。查询格在 \texttt{y\_input} 里是 JSON \texttt{null}，不是字符串 \texttt{"NaN"}。
-  \item 掩码：JSON boolean。
-  \item 拉直顺序：行优先（C-order）。\texttt{y\_query[t]} 对应 \texttt{query\_mask} 拉直后第 $t$ 个 \texttt{true}。
-\end{itemize}
-
-\section{端点一览}
-
-\begin{center}
-\begin{tabular}{@{}llll@{}}
-\toprule
-方法 & 路径 & 作用 & 鉴权 \\
-\midrule
-\texttt{GET}  & \texttt{/health} & 存活 & 无 \\
-\texttt{GET}  & \texttt{/docs} & Swagger UI & 无 \\
-\texttt{GET}  & \texttt{/redoc} & ReDoc & 无 \\
-\texttt{GET}  & \texttt{/openapi.json} & 机器可读 schema & 无 \\
-\texttt{POST} & \texttt{/v0/episodes} & 抽取观测 episode & 无 \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-URL 里的 \texttt{/v0} 是生成语义版本，不是 HTTP 框架版本。
-换响应律或换张量合同，才升 \texttt{/v1}。
-
-\section{\texttt{GET /health}}
-
-探活。生成器能 import、进程在听端口，就返回 200。
-
-\paragraph{响应 200}
-\begin{lstlisting}
-{"ok": true, "version": "v0"}
-\end{lstlisting}
-
-\begin{center}
-\begin{tabular}{@{}llp{7.5cm}@{}}
-\toprule
-字段 & 类型 & 含义 \\
-\midrule
-\texttt{ok} & bool & 恒为 true；能返回就说明活着 \\
-\texttt{version} & string & 当前生成语义版本，现为 \texttt{v0} \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-
-
-\section{\texttt{POST /v0/episodes}}
-
-一次返回 $n_{\mathrm{ep}}$ 条 episode，\textbf{每条各自抽一个总体}。
-表是完整的。missing 与 query 独立抽取，\textbf{允许重合}。
-
-\subsection{请求体}
-
-\begin{center}
-\begin{tabular}{@{}llclp{5.2cm}@{}}
-\toprule
-字段 & 类型 & 默认 & 范围 & 含义 \\
-\midrule
-\texttt{n\_units} & int & 64 & $[8,512]$ & 本集总体切片大小 \\
-\texttt{n\_features} & int & 8 & $[2,64]$ & 列数 $d$ \\
-\texttt{unit\_dim} & int & 4 & $[1,32]$ & 个体表征维 $k$ \\
-\texttt{query\_frac} & float & 0.15 & $(0,1)$ & 要预测的格子占全表比例 \\
-\texttt{missing\_frac} & float & 0.05 & $[0,0.95)$ & 世界缺失占全表比例 \\
-\texttt{sigma} & float & 0.3 & $[0,10]$ & 潜变量噪声标准差 \\
-\texttt{seed} & int/null & 0 & --- & 第 $e$ 集用 $\mathrm{seed}+e$ \\
-\texttt{n\_episodes} & int & 1 & $[1,32]$ & 条数；各抽各的总体 \\
-\texttt{type\_weights} & 对象 & 见下 & $\ge 0$ & 列类型抽样权重，不必归一化 \\
-\texttt{independent\_frac} & float & 0.05 & $[0,1]$ & 每列与其它特征独立的概率 \\
-\texttt{source} & string & discoscm & --- & 见下方来源表 \\
-\texttt{source\_name} & string/null & null & --- & 子名称，如 iris、make\_classification \\
-\texttt{return\_mechanism} & bool & false & --- & 是否带总体和响应律 \\
-\texttt{debug} & bool & false & --- & 额外潜分数 $S$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-两套 mask 独立按全表比例抽样，因此 $M\cap Q$ 一般非空，并集也不一定是 $20\%$。
-$Q\cap M$ 是缺失填补，$Q\setminus M$ 是普通预测。没有单独的 $y$ 标签：真值就在完整的 \texttt{values} 里。
-网络可见的上下文是 $\neg M \wedge \neg Q$，不必再单开字段。
-
-\subsection{响应 200}
-
-\begin{lstlisting}
-{
-  "n_episodes": 2,
-  "episodes": [
-    {
-      "seed": 0,
-      "table": {
-        "n_units": 16,
-        "n_features": 8,
-        "values": [[0.12, 3, 17, ...], ...],
-        "missing_mask": [[false, true, ...], ...],
-        "query_mask":   [[true, true, ...], ...],
-        "column_types": ["numeric", "ordinal", "categorical", "high_cardinality", ...],
-        "n_classes": [null, 5, 12, 80, ...],
-        "shapes": {"n_missing": 6, "n_query": 19, "n_query_and_missing": 1}
-      }
-    }
-  ]
-}
-\end{lstlisting}
-
-\texttt{values} 从不因 mask 挖空。数值列是 float，离散列是 $\{0,\ldots,K_j-1\}$ 的 int。
-
-列类型权重由请求体 \texttt{type\_weights} 给出，默认 $70{:}5{:}10{:}5{:}5$（数值 / 有序 / 二值 / 多值 / 超多值），按权重归一化后多项抽样。\texttt{independent\_frac} 默认 $0.05$。生成：数值 $Y=\mathrm{scale}\langle u,w\rangle+\mathrm{shift}+e$；有序为 ordered probit；多值与超多值为 unit-specific multinomial logit（Gumbel 噪声），超多值类嵌入尺度更散、频率更偏。
-
-\begin{warnbox}
-训练只吃 \texttt{table}。真值用 \texttt{values} 在 \texttt{query\_mask} 处取值。
-不要把 \texttt{population.representations} 喂进网络。
-\end{warnbox}
-
-\subsection{打开机制时：总体 + unit-specific law}
-
-\texttt{return\_mechanism=true} 时，每条 episode 多两块。它们描述表是怎么来的，不是给网络的输入。
-
-\begin{lstlisting}
-"population": {
-  "id": "pop-0",
-  "n_units": 16,
-  "unit_dim": 4,
-  "prior": "N(0, I)",
-  "representations": [[...], ...]   // 行 i 是 unit u_i 的表征
-},
-"response_law": {
-  "form": "unit_specific_factor",
-  "assignment": "Y[i,j] = <U[i], W[j]> + E[i,j]",
-  "W": {"values": ..., "column_normalize": true},
-  "noise": {"kind": "factual", "sigma": 0.3, "values": ...}
-}
-\end{lstlisting}
-
-同一条 law 作用在每个人身上；unit-specific 是因为代入了这个人的 $u_i$。
-第零版 $E$ 只抽一次，不重抽反事实噪声。
-用表征、$W$、$E$ 可还原满表。\texttt{debug} 才会再给潜分数 \texttt{S}。
-
-\begin{warnbox}
-\texttt{population.representations} 就是个体真名。检查生成器用，不要进训练。
-\end{warnbox}
-
-
-\subsection{数据来源 \texttt{source}}
-
-默认 \texttt{discoscm} 仍是 unit-specific law。其它来源编进同一套完整表 + missing/query。
-
-\begin{center}
-\begin{tabular}{@{}llp{6.4cm}@{}}
-\toprule
-\texttt{source} & 状态 & 含义 \\
-\midrule
-\texttt{discoscm} & 默认 & 先抽总体，再 unit-specific $g_j(u_i)$ \\
-\texttt{sklearn\_synthetic} & 可用 & \texttt{make\_classification/regression/friedman1/low\_rank} \\
-\texttt{sklearn\_real} & 可用 & iris / wine / breast\_cancer / diabetes \\
-\texttt{scm} & 可用 & 论文风格 ANM：特征上的随机 DAG，行 i.i.d. \\
-\texttt{openml} & 占位 & 分类/回归；默认 query 整列标签 \\
-\texttt{recsys} & 占位 & User$\times$Item；默认 query 已观测评分的子集 \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-\texttt{GET /v0/sources} 返回每条来源的画像（status、task、默认 query\_mode / missing\_frac）。分类回归（sklearn\_real / sklearn\_synthetic / openml）默认 \texttt{query\_mode=label\_column}：最后一列是标签，整列进 $Q$。DiscoSCM 与 SCM 仍是格子级。请求里的 missing/query/query\_mode 为 null 时用画像默认。
-
-\subsection{错误}
-
-
-
-\begin{center}
-\begin{tabular}{@{}clp{8cm}@{}}
-\toprule
-状态码 & 何时 & 体 \\
-\midrule
-200 & 生成成功 & 见上 \\
-422 & 字段越界、类型不对、缺 JSON & FastAPI 校验错误列表 \\
-405 & 对 \texttt{/v0/episodes} 用了 GET 等 & --- \\
-404 & 路径不存在 & --- \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-第零版没有业务错误码。格子太大被 \texttt{le=} 拦在 422，而不是生成到一半再 500。
-
-\section{调用例子}
-
-探活：
-\begin{lstlisting}
-curl -s http://127.0.0.1:8787/health
-\end{lstlisting}
-
-最小生成：
-\begin{lstlisting}
-curl -s -X POST http://127.0.0.1:8787/v0/episodes \
-  -H 'Content-Type: application/json' \
-  -d '{}'
-\end{lstlisting}
-
-指定格子（推荐写进脚本的默认）：
-\begin{lstlisting}
-curl -s -X POST http://127.0.0.1:8787/v0/episodes \
-  -H 'Content-Type: application/json' \
-  -d '{
-        "n_units": 16,
-        "n_features": 4,
-        "unit_dim": 4,
-        "query_frac": 0.15,
-        "missing_frac": 0.05,
-        "sigma": 0.3,
-        "seed": 0,
-        "n_episodes": 2,
-        "return_mechanism": false,
-        "debug": false
-      }'
-\end{lstlisting}
-
-公网隧道把主机换成当前隧道 URL 即可，路径不变。
+\texttt{/v0} 是信封版本。换共享张量合同才升 \texttt{/v1}。
+未知 source 返回 422 并列出 canonical 名；openml / recsys 返回 501。
+地址、curl、错误码在附录。
 
 \section{和生成文档的分工}
 
@@ -312,15 +148,148 @@ curl -s -X POST http://127.0.0.1:8787/v0/episodes \
 \toprule
 问题 & 去哪看 \\
 \midrule
-为什么先抽总体 & \texttt{docs/data-generation.pdf} \\
-$Y_{ij}=\langle u_i,w_j\rangle+e_{ij}$ & 同上 \\
-$C/Q$ 为什么是格子级 & 同上 \\
-这个字段叫什么、范围多少 & \textbf{本文} \\
-现在服务在哪 & 本文第 2 节 \\
+喂给网络什么、通道为什么分开 & \texttt{data-generation.pdf} 正文 \\
+DiscoSCM / SCM / sklearn 的生成细节 & 那份文档的附录 \\
+这个字段叫什么、范围多少、怎么 curl & \textbf{本文附录} \\
+现在服务在哪 & 本文附录~\ref{app:addr} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-接口改了，先改本文表格，再改 \texttt{app.py} 的 Pydantic 约束，最后才 bump 例子。
+\newpage
+\appendix
+\section{服务地址与约定}
+\label{app:addr}
+
+本机 \url{http://127.0.0.1:8787}。
+公网隧道（会变）\url{https://spotlight-predicted-heaven-clips.trycloudflare.com}。
+无鉴权。单次最多 32 episode。
+
+HTTP/1.1，JSON，UTF-8。可复现性靠 \texttt{seed}。掩码是 JSON boolean。
+\texttt{values} 不因 mask 挖空。没有 \texttt{y\_query} / \texttt{y\_input} / \texttt{context\_mask}。
+
+\section{请求字段表}
+\label{app:fields}
+
+{\small
+\begin{center}
+\begin{tabular}{@{}llccp{3.8cm}@{}}
+\toprule
+字段 & 默认 & 范围 & 作用域 & 含义 \\
+\midrule
+\texttt{n\_units} & 64 & $[8,512]$ & 共享（行数） & discoscm=unit 数；其它=$n_{\mathrm{samples}}$ \\
+\texttt{n\_features} & 8 & $[2,64]$ & 共享 & 列数 \\
+\texttt{seed} & 0 & --- & 共享 & 第 $e$ 集用 $\mathrm{seed}+e$ \\
+\texttt{n\_episodes} & 1 & $[1,32]$ & 共享 & 条数 \\
+\texttt{source} & discoscm & --- & 共享 & 生成器 \\
+\texttt{source\_name} & null & --- & 别名 & sklearn 别名 / 占位的子名 \\
+\texttt{missing\_frac} & 画像 & $[0,0.95)$ & 共享 & null 则用画像 \\
+\texttt{query\_frac} & 画像 & $(0,1)$ & 共享 & \texttt{label\_column} 时无意义 \\
+\texttt{query\_mode} & 画像 & --- & 共享 & cells / label\_column / observed\_cells \\
+\texttt{return\_mechanism} & false & --- & 共享 & 是否附带生成说明 \\
+\texttt{sigma} & 0.3 & $[0,10]$ & discoscm+scm & 噪声标准差 \\
+\texttt{debug} & false & --- & discoscm-only & 额外潜分数 \\
+\texttt{unit\_dim} & 4 & $[1,32]$ & discoscm-only & 个体表征维 \\
+\texttt{type\_weights} & 见生成文档 & $\ge 0$ & discoscm-only & 列类型权重 \\
+\texttt{independent\_frac} & 0.05 & $[0,1]$ & discoscm-only & 列边缘独立概率 \\
+\bottomrule
+\end{tabular}
+\end{center}
+}
+
+\section{\texttt{GET /v0/sources} 画像}
+\label{app:catalog}
+
+每条来源（canonical + 别名）返回：
+\texttt{status}（ready / placeholder），
+\texttt{family}，
+\texttt{row\_meaning}（unit / iid\_sample / entity\_row / user），
+\texttt{query\_mode}、\texttt{missing\_frac}、\texttt{query\_frac}，
+\texttt{uses\_unit\_token}，
+\texttt{request\_fields\_used} / \texttt{request\_fields\_ignored}，
+一句 \texttt{note}（除 discoscm 外不用 DiscoSCM 黑话）。
+
+\section{各来源默认 mask}
+\label{app:masks}
+
+{\small
+\begin{center}
+\begin{tabular}{@{}lllll@{}}
+\toprule
+\texttt{source} & 行含义 & query & missing & 备注 \\
+\midrule
+discoscm & unit & cells $0.15$ & $0.05$ & 唯一有 unit token \\
+scm & iid\_sample & label\_column & $0$ & 最后一列是 $y$ \\
+sklearn\_make\_classification & iid\_sample & label\_column & $0$ & 最后一列二值 $y$ \\
+sklearn\_make\_regression & iid\_sample & label\_column & $0$ & 连续 $y$ \\
+sklearn\_friedman1 & iid\_sample & label\_column & $0$ & 连续 $y$ \\
+sklearn\_low\_rank & iid\_sample & cells $0.15$ & $0.05$ & 无标签，矩阵补全 \\
+sklearn\_iris 等四张真实表 & entity\_row & label\_column & $0$ & 最后一列标签/靶 \\
+openml & entity\_row & label\_column & $0$ & 501 \\
+recsys & user & observed\_cells $0.15$ & 未观测=missing & 501 \\
+\bottomrule
+\end{tabular}
+\end{center}
+}
+
+sklearn 真实表：iris / wine / breast\_cancer / diabetes。
+别名 \texttt{sklearn\_synthetic}、\texttt{sklearn\_real} 套用被抽中的 canonical 画像。
+
+\section{JSON 信封与 curl}
+\label{app:json}
+
+\begin{lstlisting}
+{
+  "n_episodes": 1,
+  "episodes": [{
+    "seed": 0,
+    "table": {
+      "n_units": 16, "n_rows": 16, "n_features": 8,
+      "source": "scm",
+      "values": [[...], ...],
+      "missing_mask": [[false, ...], ...],
+      "query_mask": [[true, ...], ...],
+      "column_types": ["numeric", ...],
+      "n_classes": [null, ...],
+      "query_mode": "label_column"
+    }
+  }]
+}
+\end{lstlisting}
+
+\begin{lstlisting}
+curl -s http://127.0.0.1:8787/health
+curl -s http://127.0.0.1:8787/v0/sources
+curl -s -X POST http://127.0.0.1:8787/v0/episodes \
+  -H 'Content-Type: application/json' -d '{}'
+curl -s -X POST http://127.0.0.1:8787/v0/episodes \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"scm","n_units":32,"n_features":8,"seed":1,"return_mechanism":true}'
+curl -s -X POST http://127.0.0.1:8787/v0/episodes \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"sklearn_iris","n_units":30,"n_features":5,"seed":0}'
+\end{lstlisting}
+
+\section{机制字段对照}
+\label{app:mech}
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+来源 & \texttt{return\_mechanism} 出现 & 不会出现 \\
+\midrule
+discoscm & \texttt{population} + \texttt{response\_law} & \texttt{mechanism} \\
+scm & \texttt{mechanism}（DAG + \texttt{target\_col}） & population、response\_law \\
+sklearn\_* & \texttt{mechanism}（maker / dataset） & population、response\_law \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+形状见 \texttt{data-generation.pdf} 附录~H。
+
+\section{错误码}
+
+200 成功。422 字段越界 / 未知 source。501 占位未缓存。405 / 404 方法或路径不对。
+格子太大被 \texttt{le=} 拦在 422。
 
 \end{document}
