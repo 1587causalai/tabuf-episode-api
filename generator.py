@@ -170,8 +170,8 @@ def sample_episode(
     n_units: int = 64,
     n_features: int = 8,
     unit_dim: int = DEFAULT_UNIT_DIM,
-    query_frac: float = DEFAULT_QUERY_FRAC,
-    missing_frac: float = DEFAULT_MISSING_FRAC,
+    query_frac: float | None = None,
+    missing_frac: float | None = None,
     sigma: float = DEFAULT_SIGMA,
     column_normalize: bool = True,
     debug: bool = False,
@@ -273,8 +273,8 @@ def sample_episodes(
     n_units: int = 64,
     n_features: int = 8,
     unit_dim: int = DEFAULT_UNIT_DIM,
-    query_frac: float = DEFAULT_QUERY_FRAC,
-    missing_frac: float = DEFAULT_MISSING_FRAC,
+    query_frac: float | None = None,
+    missing_frac: float | None = None,
     sigma: float = DEFAULT_SIGMA,
     seed: int | None = 0,
     n_episodes: int = 1,
@@ -285,12 +285,18 @@ def sample_episodes(
     independent_frac: float = DEFAULT_INDEP_FRAC,
     source: str = "discoscm",
     source_name: str | None = None,
+    query_mode: str | None = None,
 ) -> list[dict[str, Any]]:
     n_episodes = max(1, min(int(n_episodes), 32))
     if seed is None:
         base = int(np.random.default_rng().integers(0, 2**31 - 1))
     else:
         base = int(seed)
+    from sources import resolve_profile
+    prof = resolve_profile(source, query_mode=query_mode, missing_frac=missing_frac, query_frac=query_frac)
+    missing_frac = float(prof["missing_frac"])
+    query_frac = float(prof["query_frac"])
+    qmode = str(prof["query_mode"])
     episodes: list[dict[str, Any]] = []
     for e in range(n_episodes):
         ep_seed = base + e
@@ -318,6 +324,7 @@ def sample_episodes(
                 rng=rng, n_units=n_units, n_features=n_features,
                 missing_frac=missing_frac, query_frac=query_frac,
                 seed=ep_seed, return_mechanism=return_mechanism,
+                query_mode=qmode,
             )
             if src == "sklearn_synthetic":
                 ep = sklearn_synthetic(source_name=source_name, **kw)

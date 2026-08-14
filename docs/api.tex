@@ -244,13 +244,13 @@ $Q\cap M$ 是缺失填补，$Q\setminus M$ 是普通预测。没有单独的 $y$
 \texttt{sklearn\_synthetic} & 可用 & \texttt{make\_classification/regression/friedman1/low\_rank} \\
 \texttt{sklearn\_real} & 可用 & iris / wine / breast\_cancer / diabetes \\
 \texttt{scm} & 可用 & 论文风格 ANM：特征上的随机 DAG，行 i.i.d. \\
-\texttt{openml} & 占位 & OpenML 分类/回归，尚未接缓存 \\
-\texttt{recsys} & 占位 & 真实推荐表（MovieLens 等），尚未接缓存 \\
+\texttt{openml} & 占位 & 分类/回归；默认 query 整列标签 \\
+\texttt{recsys} & 占位 & User$\times$Item；默认 query 已观测评分的子集 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\texttt{scm} / sklearn 的行不是 DiscoSCM unit。机制打开时会写明这一点。
+\texttt{GET /v0/sources} 返回每条来源的画像（status、task、默认 query\_mode / missing\_frac）。分类回归（sklearn\_real / sklearn\_synthetic / openml）默认 \texttt{query\_mode=label\_column}：最后一列是标签，整列进 $Q$。DiscoSCM 与 SCM 仍是格子级。请求里的 missing/query/query\_mode 为 null 时用画像默认。
 
 \subsection{错误}
 

@@ -47,8 +47,9 @@ class EpisodeRequest(BaseModel):
     n_units: int = Field(default=64, ge=8, le=512, examples=[16])
     n_features: int = Field(default=8, ge=2, le=64, examples=[8])
     unit_dim: int = Field(default=4, ge=1, le=32, examples=[4])
-    query_frac: float = Field(default=0.15, gt=0.0, lt=1.0)
-    missing_frac: float = Field(default=0.05, ge=0.0, lt=0.95)
+    query_frac: float | None = Field(default=None, description="缺省则用来源画像默认")
+    missing_frac: float | None = Field(default=None, description="缺省则用来源画像默认")
+    query_mode: str | None = Field(default=None, description="cells | label_column | observed_cells；缺省用来源画像")
     sigma: float = Field(default=0.3, ge=0.0, le=10.0)
     seed: int | None = Field(default=0)
     n_episodes: int = Field(default=1, ge=1)
@@ -90,6 +91,7 @@ class Table(BaseModel):
     column_types: list[str] = Field(description="numeric | ordinal | binary | categorical | high_cardinality")
     n_classes: list[int | None]
     shapes: TableShapes
+    query_mode: str | None = None
 
 
 class Episode(BaseModel):
@@ -115,6 +117,12 @@ def health() -> dict[str, Any]:
     return {"ok": True, "version": VERSION}
 
 
+@app.get("/v0/sources", tags=["ops"], summary="来源画像")
+def list_sources() -> dict[str, Any]:
+    from sources import SOURCE_PROFILES
+    return {"sources": SOURCE_PROFILES}
+
+
 @app.post("/v0/episodes", response_model=EpisodeResponse, response_model_exclude_none=True, tags=["episodes"], summary="抽取 n 条观测 episode")
 def create_episodes(req: EpisodeRequest) -> dict[str, Any]:
     try:
@@ -133,6 +141,7 @@ def create_episodes(req: EpisodeRequest) -> dict[str, Any]:
             independent_frac=req.independent_frac,
             source=req.source,
             source_name=req.source_name,
+            query_mode=req.query_mode,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

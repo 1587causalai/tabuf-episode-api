@@ -93,3 +93,14 @@ def test_sklearn_real_iris():
         source="sklearn_real", source_name="iris",
     )[0]
     assert ep["table"]["n_features"] == 4
+
+
+def test_sklearn_real_queries_label_column():
+    ep = sample_episodes(
+        n_units=30, n_features=5, n_episodes=1, seed=0,
+        source="sklearn_real", source_name="iris",
+        missing_frac=None, query_frac=None,
+    )[0]
+    q = ep["table"]["query_mask"]
+    assert all(row[-1] for row in q)
+    assert ep["table"].get("query_mode") == "label_column"
