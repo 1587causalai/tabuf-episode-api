@@ -98,8 +98,8 @@ HTTP/1.1，JSON，UTF-8。无鉴权。可复现性靠 \texttt{seed}。
 \toprule
 字段 & 默认 & 范围 & 谁认 & 含义 \\
 \midrule
-\texttt{n\_units} & 64 & $[8,512]$ & 共享（行数） & 仅 discoscm 把行当 unit；其它 $=n_{\mathrm{samples}}$ \\
-\texttt{n\_features} & 8 & $[2,64]$ & 共享 & 列数 \\
+\texttt{n\_units} & 1000 & $[8,4096]$ & 共享（行数） & 仅 discoscm 把行当 unit；其它 $=n_{\mathrm{samples}}$ \\
+\texttt{n\_features} & null & $[2,1000]$ & 共享 & 列数；null 则 discoscm 从先验抽（众数约 20）；其它来源回退 20 \\
 \texttt{seed} & 0 & --- & 共享 & 第 $e$ 集用 $\mathrm{seed}+e$ \\
 \texttt{n\_episodes} & 1 & $[1,32]$ & 共享 & 条数；$>32$ 截成 32，不报错 \\
 \texttt{source} & discoscm & --- & 共享 & 生成器 canonical 名或别名 \\
@@ -113,6 +113,8 @@ HTTP/1.1，JSON，UTF-8。无鉴权。可复现性靠 \texttt{seed}。
 \texttt{unit\_dim} & 4 & $[1,32]$ & discoscm-only & 个体表征维 $k$ \\
 \texttt{type\_weights} & $70{:}5{:}10{:}5{:}5$ & $\ge 0$，和$>0$ & discoscm-only & 列类型权重（不必归一化） \\
 \texttt{independent\_frac} & 0.05 & $[0,1]$ & discoscm-only & 列与 $u$ 断开、改抽边缘的概率 \\
+\texttt{max\_parents} & null & $[1,512]$ & discoscm-only & null：典型上限 6 + 少量 hub；整数：全体硬上限 \\
+\texttt{dag\_edge\_p} & 0.3 & $[0,1]$ & discoscm-only & 遗留；仍写入 response\_law，新 DAG 不用 Bernoulli$(p)$ \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -204,7 +206,7 @@ canonical & 别名 & 行含义 & query & missing & HTTP \\
 \toprule
 source & 会出现 & 不会出现 \\
 \midrule
-discoscm & \texttt{population} + \texttt{response\_law} & \texttt{mechanism} \\
+discoscm & \texttt{population}（\texttt{mixture}+\texttt{assignment}+\texttt{representations}）+ \texttt{response\_law} & \texttt{mechanism} \\
 scm & \texttt{mechanism}：\texttt{framework=ANM-SCM}，\texttt{edges}，\texttt{node\_fn}，\texttt{target\_col} & population、response\_law \\
 sklearn\_* & \texttt{mechanism}：\texttt{maker} 或 \texttt{dataset} & population、response\_law \\
 openml / recsys & --- & 整条请求 501，无 episode \\
@@ -212,6 +214,11 @@ openml / recsys & --- & 整条请求 501，无 episode \\
 \end{tabular}
 \end{center}
 }
+
+\texttt{population.mixture}：\texttt{n\_components}=$M$，
+$M$ 在 $1\ldots\lfloor\sqrt{n}\rfloor$ 上 $P(M=m)\propto 1/m$；
+每个分量 \texttt{family} 为 \texttt{gaussian} 或 \texttt{cauchy}。
+\texttt{assignment[i]} 是 unit $i$ 的分量下标。含义见生成手册附录 A.2。
 
 \section{可复制 curl}
 

@@ -147,7 +147,8 @@
 
 \paragraph{DiscoSCM。}
 行\textbf{就是} unit，每人有潜变量 $u_i$。
-先抽总体，再在特征 token $\mathbf{t}_j$ 上抽单位球 SCM
+先抽总体（位置--尺度混合：$M$ 按 $1/M$ 落在 $1\ldots\lfloor\sqrt{n}\rfloor$，分量独立 Gaussian / Cauchy），
+再在特征 token $\mathbf{t}_j$ 上抽单位球 SCM
 （稀疏骨架 + 星枢纽 DAG、父混合后非线性 $\varphi$、异质噪声），
 再用 unit-specific 线性响应律 $g_j(\langle u_i,\mathbf{t}_j\rangle, e)$ 填格子（$K$ 类为线性 softmax）。
 这是 \Disco{} 自己的世界 \cite{gong2024discoscm}。公式在附录~\ref{app:disco}。
@@ -196,7 +197,7 @@ $M$ 与 $Q$ 可重合。训练路径禁止 $u_i$ 进网。
 \begin{itemize}
   \item 观测 episode；不干预、不重抽反事实噪声。
   \item 多通道，共享信封。
-  \item DiscoSCM：先总体，再特征 token 单位球 SCM（hub DAG、$\varphi$、异质噪声），再 unit-specific 填格。
+  \item DiscoSCM：先混合总体，再特征 token 单位球 SCM（hub DAG、$\varphi$、异质噪声），再 unit-specific 填格。
   \item 其它通道按自己的世界生成，再进同一 Compiler。
   \item $R$ 与 $S$ 不许静默平均成一个头。现在只训 $R$。
 \end{itemize}
@@ -368,7 +369,7 @@ $\varphi$ 只作用在 token SEM 的 $\mathbf{s}^{\mathrm{raw}}$ 上，不作用
 \texttt{unit\_dim} 默认 \texttt{null}（从先验抽样，众数约 $16$，支持 $[2,1024]$）。
 
 \texttt{return\_mechanism} 或 \texttt{debug} 时带
-\texttt{population}（含 \texttt{representations}）和
+\texttt{population}（含混合总体 \texttt{mixture} / \texttt{assignment} / \texttt{representations}）和
 \texttt{response\_law}（DAG 的 \texttt{parents} / \texttt{betas}、
 \texttt{dag\_edge\_p}（遗留） / \texttt{max\_parents} /
 \texttt{typical\_max\_parents} / \texttt{max\_in\_degree} /
@@ -395,7 +396,7 @@ $\varphi$ 只作用在 token SEM 的 $\mathbf{s}^{\mathrm{raw}}$ 上，不作用
 \node[lab=blue!60!black] (a1) at (0,0) {1 尺寸};
 \node[box=blue!60!black, anchor=west] (b1) at (2.0,0) {$n{=}1000$；$d$ 未指定则抽样（80\% 众数约 20，15\% 到 200，5\% 到 $200$–$1000$）。};
 \node[lab=blue!60!black] (a2) at (0,-1.15) {2 Prior};
-\node[box=blue!60!black, anchor=west] (b2) at (2.0,-1.15) {$u_i\sim\mathcal{N}(0,I_k)$，$k$ 未指定则抽样（众数约 16，支持 $[2,1024]$）。};
+\node[box=blue!60!black, anchor=west] (b2) at (2.0,-1.15) {总体混合：$M\sim 1/m$ 于 $1\ldots\lfloor\sqrt{n}\rfloor$，分量独立 Gaussian/Cauchy。$k$ 未指定则抽样（众数约 16）。};
 \node[lab=blue!60!black] (a3) at (0,-2.30) {3 列类型};
 \node[box=blue!60!black, anchor=west] (b3) at (2.0,-2.30) {权重 $70{:}5{:}10{:}5{:}5$。独立列概率 $0.05$，不进 DAG。};
 \node[lab=orange!80!black] (a4) at (0,-3.45) {4 DAG};
@@ -512,7 +513,10 @@ recsys & user & observed\_cells & 未观测 & 已观测的 $0.15$ \\
 
 discoscm 在 \texttt{return\_mechanism} 或 \texttt{debug} 时给两块：
 \texttt{population} 含 \texttt{id}、\texttt{n\_units}、\texttt{unit\_dim}、
-\texttt{prior}、\texttt{representations}（行 $i$ 是 $u_i$）；
+\texttt{prior}（\texttt{location\_scale\_mixture}）、
+\texttt{mixture}（$M$、\texttt{weights}、逐分量 \texttt{family}/\texttt{location}/\texttt{scale}）、
+\texttt{assignment}、
+\texttt{representations}（行 $i$ 是 $u_i$）；
 \texttt{response\_law} 含 \texttt{form}（\texttt{feature\_token\_linear\_scm}）、
 \texttt{type\_weights}、\texttt{column\_independent\_prob}、
 \texttt{dag\_edge\_p}（遗留）、\texttt{max\_parents}、
