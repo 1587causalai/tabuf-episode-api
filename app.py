@@ -47,9 +47,9 @@ class TypeWeights(BaseModel):
 
 
 class EpisodeRequest(BaseModel):
-    n_units: int = Field(default=64, ge=8, le=512, examples=[16], description="行数旋钮。只有 discoscm 把行解释成 unit；scm/sklearn 里是 n_samples")
-    n_features: int = Field(default=8, ge=2, le=64, examples=[8])
-    unit_dim: int = Field(default=4, ge=1, le=32, examples=[4], description="discoscm-only：个体表征维 k。其它来源忽略")
+    n_units: int = Field(default=1000, ge=8, le=4096, examples=[1000], description="行数旋钮。只有 discoscm 把行解释成 unit；scm/sklearn 里是 n_samples")
+    n_features: int | None = Field(default=None, ge=2, le=1000, description="null 则从先验抽样（众数约 20，支持 2–1000）")
+    unit_dim: int | None = Field(default=None, ge=2, le=1024, description="discoscm-only：个体表征维 k。null 则从先验抽样（众数约 16，支持 2–1024）")
     query_frac: float | None = Field(default=None, description="缺省则用来源画像默认")
     missing_frac: float | None = Field(default=None, description="缺省则用来源画像默认")
     query_mode: str | None = Field(default=None, description="cells | label_column | observed_cells；缺省用来源画像")
@@ -58,6 +58,12 @@ class EpisodeRequest(BaseModel):
     n_episodes: int = Field(default=1, ge=1)
     type_weights: TypeWeights = Field(default_factory=TypeWeights, description="discoscm-only：列类型抽样权重，不必归一化")
     independent_frac: float = Field(default=0.05, ge=0.0, le=1.0, description="discoscm-only：每列与其它特征独立的概率")
+    dag_edge_p: float = Field(default=0.3, ge=0.0, le=1.0, description="discoscm-only：遗留字段，仍写入 response_law；新 DAG 不再按 Bernoulli(p) 连边")
+    max_parents: int | None = Field(default=None, ge=1, le=512, description="discoscm-only：None 时普通图父节点上限 6；显式整数为硬上限。星形枢纽是小概率混合臂，不是默认")
+    graph_family: str | None = Field(default=None, description="discoscm-only：null 则 85% sparse / 15% star；可强制 sparse | star")
+    token_heritability: float = Field(default=0.75, ge=0.05, le=0.95, description="discoscm-only：子 token 与父信号的余弦目标 α")
+    beta_min: float = Field(default=0.5, description="discoscm-only：相对混合权重 |β| 下界（L1 归一之前）")
+    beta_max: float = Field(default=2.0, description="discoscm-only：相对混合权重 |β| 上界（L1 归一之前）")
     source: str = Field(
         default="discoscm",
         description=(
@@ -79,6 +85,12 @@ class EpisodeRequest(BaseModel):
     @classmethod
     def cap_episodes(cls, v: int) -> int:
         return max(1, min(int(v), 32))
+
+    @model_validator(mode="after")
+    def beta_range(self) -> "EpisodeRequest":
+        if not (self.beta_max > self.beta_min):
+            raise ValueError("beta_max must be greater than beta_min")
+        return self
 
 
 class TableShapes(BaseModel):
@@ -150,6 +162,12 @@ def create_episodes(req: EpisodeRequest) -> dict[str, Any]:
             return_mechanism=req.return_mechanism,
             type_weights=req.type_weights.model_dump(),
             independent_frac=req.independent_frac,
+            dag_edge_p=req.dag_edge_p,
+            max_parents=req.max_parents,
+            token_heritability=req.token_heritability,
+            beta_min=req.beta_min,
+            beta_max=req.beta_max,
+            graph_family=req.graph_family,
             source=req.source,
             source_name=req.source_name,
             query_mode=req.query_mode,

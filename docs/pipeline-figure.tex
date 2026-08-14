@@ -1,0 +1,106 @@
+\documentclass[10pt,landscape,a4paper,fontset=none]{ctexart}
+\usepackage[margin=0.95cm]{geometry}
+\setCJKmainfont{Noto Serif CJK SC}[BoldFont=Noto Serif CJK SC Bold]
+\setCJKsansfont{Noto Sans CJK SC}[BoldFont=Noto Sans CJK SC Bold]
+\usepackage{amsmath,amssymb,bm}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc}
+\usepackage{xcolor}
+\pagecolor{white}
+\pagestyle{empty}
+\definecolor{ink}{HTML}{1B2430}
+\definecolor{muted}{HTML}{5C6570}
+\definecolor{prior}{HTML}{1F4E79}
+\definecolor{world}{HTML}{C45C26}
+\definecolor{comp}{HTML}{2E7D4F}
+\definecolor{priorbg}{HTML}{EAF1F8}
+\definecolor{worldbg}{HTML}{FBF0E8}
+\definecolor{compbg}{HTML}{E8F5EE}
+\definecolor{line}{HTML}{9AA7B4}
+\begin{document}
+\centering
+{\sffamily\bfseries\large\color{ink} DiscoSCM 观测 episode 生成流水线}\\[1pt]
+{\sffamily\small\color{muted} 因果图在特征 token $\mathbf{t}_j$ 上，不在格子值 $Y$ 上。空请求走这一条。}\\[6pt]
+\begin{tikzpicture}[
+  font=\sffamily\footnotesize,
+  >=Latex,
+  node distance=3.6mm and 3.2mm,
+  stage/.style={
+    rounded corners=3pt, inner sep=6.5pt,
+    text width=22.6cm, align=left, anchor=north west,
+    line width=0.55pt,
+  },
+  tag/.style={
+    rounded corners=2.2pt, minimum width=1.62cm, minimum height=0.70cm,
+    font=\sffamily\bfseries\footnotesize, text=white, align=center,
+    anchor=east,
+  },
+]
+\node[stage, fill=priorbg, draw=prior] (b1) {%
+\textbf{\color{prior}尺寸}\quad $n=1000$。$d$、$k$ 未指定则手工混合先验（就这样定了）。\\[2pt]
+$d$：80\% $\mathrm{LogNormal}(\log 20,0.5^{2})$ clip $[4,64]$；
+15\% $\mathrm{LogUnif}[20,200]$；5\% $\mathrm{LogUnif}[200,1000]$。最后 $d\in[2,1000]$。\\[1pt]
+$k$：80\% $\mathrm{LogNormal}(\log 16,0.45^{2})$ clip $[2,64]$；
+15\% $\mathrm{LogUnif}[32,256]$；5\% $\mathrm{LogUnif}[256,1024]$。最后 $k\in[2,1024]$。};
+\node[tag, fill=prior, left=of b1.west] (t1) {1 尺寸};
+
+\node[stage, fill=priorbg, draw=prior, below=of b1] (b2) {%
+\textbf{\color{prior}Prior}\quad 位置--尺度混合，不是单团 $\mathcal{N}(0,I_k)$。每条 episode 自己抽一遍。\\[2pt]
+$M\in\{1,\ldots,\lfloor\sqrt{n}\rfloor\}$，$P(M=m)\propto 1/m$，
+$\pi\sim\mathrm{Dirichlet}(1_M)$。分量独立 Gaussian / Cauchy。\\[1pt]
+$M=1$ 且高斯时 $\mathbf{u}_i\sim\mathcal{N}(0,I_k)$。$\mathbf{u}_i\in\mathbb{R}^k$ 是 unit，不是行号。};
+\node[tag, fill=prior, left=of b2.west] (t2) {2 Prior};
+
+\node[stage, fill=priorbg, draw=prior, below=of b2] (b3) {%
+\textbf{\color{prior}列类型}\quad
+$\mathrm{type}_j\sim\mathrm{Mult}(0.70,0.05,0.10,0.05,0.05)$
+（数值 / 有序 / 二值 / 多值 / 超多值）。
+独立列概率 $0.05$：不进 DAG，没有 $\mathbf{t}_j$，只抽类型边缘。};
+\node[tag, fill=prior, left=of b3.west] (t3) {3 列类型};
+
+\node[stage, fill=worldbg, draw=world, below=of b3] (b4) {%
+\textbf{\color{world}Token DAG}\quad
+非独立列随机拓扑序 $\pi$。以 $0.85$ 抽常见稀疏图，以 $0.15$ 叠星形枢纽（能力，不是默认）。\\[2pt]
+$|\mathrm{pa}(j)|\sim\min(\mathrm{Poisson}(2.2),6)$，
+$P(p\in\mathrm{pa}(j))\propto\mathrm{outdeg}(p)+1$（$p\prec_{\pi}j$）。\\[1pt]
+星形：$\mathrm{frac}\sim\mathrm{Unif}[0.45,0.85]$；拓扑前段 out-hub，后段 in-hub。};
+\node[tag, fill=world, left=of b4.west] (t4) {4 DAG};
+
+\node[stage, fill=worldbg, draw=world, below=of b4] (b5) {%
+\textbf{\color{world}Token SEM}\quad
+非线性 $\varphi$ 只打在结构方程上。$\beta$ 是混合权重，$\alpha=0.75$ 是效应强度。\\[2pt]
+$|\tilde\beta|\sim\mathrm{Unif}[0.5,2]$，符号 $\pm 1$，
+$\beta=\tilde\beta/\|\tilde\beta\|_{1}$。根：$\mathbf{t}_j=\mathrm{normalize}(\eta_j)$。\\[1pt]
+$\mathbf{s}^{\mathrm{raw}}=\sum_{p}\beta_{jp}\mathbf{t}_p$，
+$\mathbf{s}=\mathrm{normalize}(\varphi(\mathbf{s}^{\mathrm{raw}}))$，
+$\mathbf{t}_j=\mathrm{normalize}(\alpha\mathbf{s}+\sqrt{1-\alpha^{2}}\,\eta)$，$\eta\perp\mathbf{s}$。\\[1pt]
+$\varphi\in\{\mathrm{id},\tanh,\mathrm{lReLU}_{0.2},\sin\}$ 概率 $0.50/0.20/0.20/0.10$。
+$\eta$：高斯 $0.50$ / $t_{\nu}$ $0.30$（$\nu\in\{3,4,5,6\}$）/ Cauchy $0.20$。};
+\node[tag, fill=world, left=of b5.west] (t5) {5 SEM};
+
+\node[stage, fill=compbg, draw=comp, below=of b5] (b6) {%
+\textbf{\color{comp}填格}\quad
+响应对 $u$ 线性。$e_{ij}=\sigma\varepsilon_{ij}$，$\sigma=0.3$，$\varepsilon$ 用该列噪声族。\\[2pt]
+$Y^{\mathrm{num}}=\mathrm{scale}\,\langle\mathbf{u},t_j\rangle+\mathrm{shift}+e$，
+$Y^{\mathrm{bin}}=\mathbf{1}\{\langle\mathbf{u},t_j\rangle+e>0\}$。
+有序：同一指数切阈值。\\[1pt]
+$C_c=a_c t_j+0.25\,r_c$，$r_c\perp t_j$，
+$p=\mathrm{softmax}(C\mathbf{u})$，$Y\sim\mathrm{Categorical}(p)$。};
+\node[tag, fill=comp, left=of b6.west] (t6) {6 填格};
+
+\node[stage, fill=compbg, draw=comp, below=of b6] (b7) {%
+\textbf{\color{comp}信封}\quad
+$P(M_{ij}=1)=0.05$，$P(Q_{ij}=1)=0.15$，独立抽取，允许重合。
+线上只有 \texttt{values}+\texttt{missing\_mask}+\texttt{query\_mask}。
+$U$ / DAG / $t_j$ 默认不返回。训练路径禁止 $u_i$ 进网。};
+\node[tag, fill=comp, left=of b7.west] (t7) {7 信封};
+
+\foreach \a/\b in {t1/t2,t2/t3,t3/t4,t4/t5,t5/t6,t6/t7}
+  \draw[line, line width=1.05pt, -{Latex[length=2mm]}] (\a) -- (\b);
+\end{tikzpicture}
+
+\vspace{5pt}
+{\sffamily\scriptsize\color{muted}
+蓝 Prior $\to$ 橙 World token SCM $\to$ 绿 Compiler。
+v0 观测 only：不做 $do(x)$，不重抽反事实噪声，不训 S 臂。}
+\end{document}

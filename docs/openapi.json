@@ -175,35 +175,40 @@
         "properties": {
           "n_units": {
             "type": "integer",
-            "maximum": 512.0,
+            "maximum": 4096.0,
             "minimum": 8.0,
             "title": "N Units",
             "description": "行数旋钮。只有 discoscm 把行解释成 unit；scm/sklearn 里是 n_samples",
-            "default": 64,
+            "default": 1000,
             "examples": [
-              16
+              1000
             ]
           },
           "n_features": {
-            "type": "integer",
-            "maximum": 64.0,
-            "minimum": 2.0,
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000.0,
+                "minimum": 2.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "N Features",
-            "default": 8,
-            "examples": [
-              8
-            ]
+            "description": "null 则从先验抽样（众数约 20，支持 2–1000）",
+            "default": null
           },
           "unit_dim": {
-            "type": "integer",
-            "maximum": 32.0,
-            "minimum": 1.0,
+            "anyOf": [
+              {"type": "integer"},
+              {"type": "null"}
+            ],
+            "maximum": 1024.0,
+            "minimum": 2.0,
             "title": "Unit Dim",
-            "description": "discoscm-only：个体表征维 k。其它来源忽略",
-            "default": 4,
-            "examples": [
-              4
-            ]
+            "description": "discoscm-only：个体表征维 k。null 则从先验抽样（众数约 16，支持 2–1024）",
+            "default": null
           },
           "query_frac": {
             "anyOf": [
@@ -277,6 +282,49 @@
             "title": "Independent Frac",
             "description": "discoscm-only：每列与其它特征独立的概率",
             "default": 0.05
+          },
+          "dag_edge_p": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Dag Edge P",
+            "description": "discoscm-only：遗留字段，仍写入 response_law；新 DAG 不再按 Bernoulli(p) 连边",
+            "default": 0.3
+          },
+          "max_parents": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 512.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Parents",
+            "description": "discoscm-only：None 时典型父节点上限 6 且允许少量 hub 超过；显式整数则为所有节点（含 hub）的硬上限",
+            "default": null
+          },
+          "token_heritability": {
+            "type": "number",
+            "maximum": 0.95,
+            "minimum": 0.05,
+            "title": "Token Heritability",
+            "description": "discoscm-only：子 token 与父信号的余弦目标 α",
+            "default": 0.75
+          },
+          "beta_min": {
+            "type": "number",
+            "title": "Beta Min",
+            "description": "discoscm-only：相对混合权重 |β| 下界（L1 归一之前）",
+            "default": 0.5
+          },
+          "beta_max": {
+            "type": "number",
+            "title": "Beta Max",
+            "description": "discoscm-only：相对混合权重 |β| 上界（L1 归一之前）",
+            "default": 2.0
           },
           "source": {
             "type": "string",

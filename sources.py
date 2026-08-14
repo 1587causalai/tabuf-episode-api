@@ -56,7 +56,7 @@ _SHARED = (
     "query_mode",
     "return_mechanism",
 )
-_DISCOSCM_ONLY = ("unit_dim", "type_weights", "independent_frac")
+_DISCOSCM_ONLY = ("unit_dim", "type_weights", "independent_frac", "dag_edge_p", "max_parents", "token_heritability", "beta_min", "beta_max", "graph_family")
 _SIGMA = ("sigma",)
 _DEBUG = ("debug",)
 _SOURCE_NAME = ("source_name",)
