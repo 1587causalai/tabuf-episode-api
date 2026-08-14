@@ -134,124 +134,119 @@ URL 里的 \texttt{/v0} 是生成语义版本，不是 HTTP 框架版本。
 \end{tabular}
 \end{center}
 
+
 \section{\texttt{POST /v0/episodes}}
 
-抽一批观测 episode。每集独立：先抽总体 $\{\mathbf{u}_i\}$，再填
-$Y_{ij}=\langle\mathbf{u}_i,\mathbf{w}_j\rangle+e_{ij}$，再切 $C/Q$。
+一次返回 $n_{\mathrm{ep}}$ 条 episode。每条是\textbf{一张带 mask 的表}，不是一行。
+生成顺序：抽总体 $\{\mathbf{u}_i\}$ $\to$ 用 unit-specific law 填格 $\to$ 世界缺失 $\to$ 再在剩余格子上出查询题。
 
 \subsection{请求体}
 
 全部字段可选。缺省等于下表默认值。非法值返回 422。
 
 \begin{center}
-\begin{tabular}{@{}llclp{5.6cm}@{}}
+\begin{tabular}{@{}llclp{5.4cm}@{}}
 \toprule
 字段 & 类型 & 默认 & 范围 & 含义 \\
 \midrule
-\texttt{n\_units} & int & 64 & $[8,512]$ & 本集 unit 数 $n$ \\
+\texttt{n\_units} & int & 64 & $[8,512]$ & 本集总体切片大小 \\
 \texttt{n\_features} & int & 8 & $[2,64]$ & 列数 $d$ \\
-\texttt{unit\_dim} & int & 4 & $[1,32]$ & 个体潜维 $k$ \\
-\texttt{query\_frac} & float & 0.15 & $(0,1)$ & $Q$ 占总格子比例 \\
+\texttt{unit\_dim} & int & 4 & $[1,32]$ & 个体表征维 $k$ \\
+\texttt{query\_frac} & float & 0.15 & $(0,1)$ & value mask，占全表比例 \\
+\texttt{missing\_frac} & float & 0 & $[0,0.9)$ & 世界缺失，占全表比例 \\
 \texttt{sigma} & float & 0.3 & $[0,10]$ & 观测噪声标准差 \\
 \texttt{seed} & int/null & 0 & --- & 基种子；第 $e$ 集用 $\mathrm{seed}+e$ \\
-\texttt{n\_episodes} & int & 1 & $[1,32]$ & 一次返回多少集（硬顶 32） \\
-\texttt{return\_mechanism} & bool & false & --- & 是否返回该集 DiscoSCM \\
-\texttt{debug} & bool & false & --- & 额外满表 $Y_{\mathrm{full}}$；隐含上一开关 \\
+\texttt{n\_episodes} & int & 1 & $[1,32]$ & 一次返回多少条 episode \\
+\texttt{return\_mechanism} & bool & false & --- & 是否带总体和响应律 \\
+\texttt{debug} & bool & false & --- & 额外 $Y_{\mathrm{full}}$；隐含上一开关 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\texttt{seed=null} 时服务端随机抽一个基种子，仍然写入每集的 \texttt{seed} 字段，所以返回值可复现、请求不必可复现。
-
-最小请求：空对象 \texttt{\{\}}，等价于 $64\times 8$、$k=4$、$q=0.15$、1 集。
+\texttt{query\_frac} 与 \texttt{missing\_frac} 都按全表格子计，抽成互不相交的两套。
+至少留 1 个上下文格和 1 个查询格。JSON 里\textbf{永远}有 \texttt{missing\_mask}，即使默认全 false。
 
 \subsection{响应 200}
 
 \begin{lstlisting}
 {
+  "n_episodes": 2,
   "episodes": [
     {
-      "context_mask": [[true, false], ...],
-      "query_mask":   [[false, true], ...],
-      "y_input":      [[0.12, null], ...],
-      "y_query":      [0.87, ...],
-      "shapes": {
-        "n_units": 16, "n_features": 4, "unit_dim": 4,
-        "n_query": 10, "n_context": 54,
-        "y_input": [16, 4],
-        "context_mask": [16, 4],
-        "query_mask": [16, 4],
-        "y_query": [10]
-      },
-      "seed": 0
+      "seed": 0,
+      "table": {
+        "n_units": 16,
+        "n_features": 4,
+        "values": [[0.12, null, ...], ...],
+        "missing_mask": [[false, true, ...], ...],
+        "context_mask": [[true, false, ...], ...],
+        "query_mask":   [[false, false, ...], ...],
+        "y_query": [0.87, ...],
+        "shapes": {"n_missing": 6, "n_context": 48, "n_query": 10, ...}
+      }
     }
   ]
 }
 \end{lstlisting}
 
+默认每条 episode 只有 \texttt{seed} 和 \texttt{table}。
+
 \begin{center}
-\begin{tabular}{@{}llp{7.2cm}@{}}
+\begin{tabular}{@{}llp{6.8cm}@{}}
 \toprule
 字段 & 形状 & 含义 \\
 \midrule
-\texttt{context\_mask} & $n\times d$ bool & $M^C$；true $\Leftrightarrow$ 该格 $\in C$ \\
-\texttt{query\_mask} & $n\times d$ bool & $M^Q$；true $\Leftrightarrow$ 该格 $\in Q$ \\
-\texttt{y\_input} & $n\times d$ float/null & $C$ 上为 $Y_{ij}$，$Q$ 上为 \texttt{null} \\
-\texttt{y\_query} & $n_Q$ float & $Q$ 上真值，行优先拉直 \\
-\texttt{shapes} & 对象 & 以上张量形状，避免客户端猜 \\
-\texttt{seed} & int & 本集实际使用的种子 \\
-\texttt{U} & $n\times k$ & 仅 \texttt{debug=true} \\
-\texttt{W} & $d\times k$ & 仅 \texttt{debug=true} \\
-\texttt{Y\_full} & $n\times d$ & 仅 \texttt{debug=true} \\
+\texttt{table.values} & $n\times d$ & 仅 $C$ 有数；缺失和查询为 \texttt{null} \\
+\texttt{table.missing\_mask} & $n\times d$ bool & World 缺失 $M$ \\
+\texttt{table.context\_mask} & $n\times d$ bool & 网络可见 $C$ \\
+\texttt{table.query\_mask} & $n\times d$ bool & 考题 $Q$（value mask） \\
+\texttt{table.y\_query} & $n_Q$ & $Q$ 上真值，行优先 \\
+\texttt{population} & 对象 & 仅 \texttt{return\_mechanism} \\
+\texttt{response\_law} & 对象 & 仅 \texttt{return\_mechanism} \\
+\texttt{Y\_full} & $n\times d$ & 仅 \texttt{debug} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-不变量（第零版）：
+不变量：
 
 \begin{align*}
-  C\cap Q&=\emptyset,\\
-  C\cup Q&=\{1,\ldots,n\}\times\{1,\ldots,d\},\\
-  n_Q&=\mathrm{clip}(\mathrm{round}(q\cdot nd),1,nd-1).
+  M \cap C = C \cap Q = M \cap Q &= \emptyset,\\
+  M \cup C \cup Q &= \{1,\ldots,n\}\times\{1,\ldots,d\}.
 \end{align*}
 
-默认 payload \textbf{不含} $U,W,Y_{\mathrm{full}}$。
-\texttt{debug=true} 时才出现这三个键；\texttt{false} 时键直接省略，不是 \texttt{null}。
+\texttt{values} 非空当且仅当该格 $\in C$。
 
 \begin{warnbox}
-训练 DataLoader 禁止设 \texttt{debug=true}，禁止把 $U$ 喂进网络。
-$u_i$ 是个体真名。漏出去，预训练就是漏题。
+训练 DataLoader 只吃 \texttt{table}。禁止 \texttt{return\_mechanism} / \texttt{debug}，禁止把 $u_i$ 喂进网络。
 \end{warnbox}
 
-\subsection{\texttt{return\_mechanism}：每集背后的 DiscoSCM}
+\subsection{打开机制时：总体 + unit-specific law}
 
-默认\textbf{不}返回生成机制。训练路径必须保持关闭。
-打开后，每个 episode 多一个 \texttt{mechanism} 对象，按 DiscoSCM 元组 $\langle U,\mathbf{E},\mathbf{V},\mathcal{F}\rangle$ 给出这一集的世界是怎么来的。
+\texttt{return\_mechanism=true} 时，每条 episode 多两块。它们描述表是怎么来的，不是给网络的输入。
 
 \begin{lstlisting}
-"mechanism": {
-  "framework": "DiscoSCM",
-  "version": "v0",
-  "observational": true,
-  "U":  {"role": "unit_selection", "prior": "N(0, I)", "shape": [n, k], "values": ...},
-  "E":  {"role": "factual_noise", "sigma": 0.3, "independent_of_U": true, "values": ...},
-  "V":  ["Y"],
-  "F":  {
-    "form": "unit_specific_factor",
-    "assignment": "Y[i,j] = <U[i], W[j]> + E[i,j]",
-    "column_normalize": true,
-    "W": {"role": "shared_feature_directions", "values": ...}
-  }
+"population": {
+  "id": "pop-0",
+  "n_units": 16,
+  "unit_dim": 4,
+  "prior": "N(0, I)",
+  "representations": [[...], ...]   // 行 i 是 unit u_i 的表征
+},
+"response_law": {
+  "form": "unit_specific_factor",
+  "assignment": "Y[i,j] = <U[i], W[j]> + E[i,j]",
+  "W": {"values": ..., "column_normalize": true},
+  "noise": {"kind": "factual", "sigma": 0.3, "values": ...}
 }
 \end{lstlisting}
 
-$U$ 是 unit selection，不是 SCM 的外生噪声。第零版 $\mathbf{E}$ 是一次观测噪声，不重抽 $\mathbf{E}(\mathbf{x})$。
-用 $U,W,E$ 可以还原满表 $Y=UW^{\top}+E$，因此机制通道\textbf{不}再附带 $Y_{\mathrm{full}}$。
-\texttt{debug=true} 才会额外给出顶层 $U,W,Y_{\mathrm{full}}$（兼容旧字段），并隐含 \texttt{return\_mechanism=true}。
+同一条 law 作用在每个人身上；unit-specific 是因为代入了这个人的 $u_i$。
+第零版 $E$ 只抽一次，不重抽反事实噪声。
+用表征、$W$、$E$ 可还原满表。\texttt{debug} 才会再给 \texttt{Y\_full}。
 
 \begin{warnbox}
-\texttt{return\_mechanism} 与 \texttt{debug} 都是漏题开关。DataLoader 必须保持 false。
-需要机制的场景：检查生成器、写识别实验、对拍 Compiler。不要把 \texttt{mechanism} 喂进网络。
+\texttt{population.representations} 就是个体真名。检查生成器用，不要进训练。
 \end{warnbox}
 
 \subsection{错误}
@@ -295,9 +290,11 @@ curl -s -X POST http://127.0.0.1:8787/v0/episodes \
         "n_features": 4,
         "unit_dim": 4,
         "query_frac": 0.15,
+        "missing_frac": 0.1,
         "sigma": 0.3,
         "seed": 0,
         "n_episodes": 2,
+        "return_mechanism": false,
         "debug": false
       }'
 \end{lstlisting}

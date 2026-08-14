@@ -1,27 +1,8 @@
-"""Observational v0 TabUF episode generator (DiscoSCM-aligned factor law).
+"""Observational v0 TabUF episode generator (DiscoSCM-aligned).
 
-This samples Unit×Feature grids for TabUF training. It is observational v0
-only: no intervention, no counterfactual noise redraw. It is not a DiscoSCM
-paper reimplementation of Layer 3.
-
-Generative law
---------------
-Population: n realized units with attributes U of shape (n, k), U ~ N(0, I).
-Shared feature directions W of shape (d, k), W ~ N(0, I), then optional
-column-normalize so each of the k latent axes has unit L2 length in R^d.
-Observational noise E ~ N(0, sigma^2).
-
-    Y[i, j] = <U[i], W[j]> + E[i, j]
-
-Row i is an observation attributed to realized unit u_i. Do not read
-U[i] ~ N(0, I) as "each row is a new population": the population is the
-set of n realized units {u_0, ..., u_{n-1}} that share feature directions W.
-
-No natural missingness. Query set Q is a random subset of cells (~query_frac);
-context C is the complement. C ∩ Q = empty, C ∪ Q = all cells.
-
-The model must not receive the DiscoSCM mechanism unless return_mechanism=True.
-Training payloads omit it. debug=True also attaches Y_full.
+Return unit is an episode: one Unit x Feature table with three disjoint masks
+(missing / context / query). Behind each table sits a population of units and a
+unit-specific response law. Those are omitted unless return_mechanism=True.
 """
 
 from __future__ import annotations
@@ -33,10 +14,11 @@ import numpy as np
 DEFAULT_UNIT_DIM = 4
 DEFAULT_SIGMA = 0.3
 DEFAULT_QUERY_FRAC = 0.15
+DEFAULT_MISSING_FRAC = 0.0
+MECHANISM_LAW = "Y[i,j] = <U[i], W[j]> + E[i,j]"
 
 
 def _json_float_grid(arr: np.ndarray) -> list[list[float | None]]:
-    """Nested lists; NaN becomes JSON null."""
     out: list[list[float | None]] = []
     for row in arr:
         out.append([None if not np.isfinite(v) else float(v) for v in row])
@@ -47,53 +29,45 @@ def _json_bool_grid(arr: np.ndarray) -> list[list[bool]]:
     return arr.astype(bool).tolist()
 
 
-MECHANISM_LAW = "Y[i,j] = <U[i], W[j]> + E[i,j]"
+def _pack_population(U: np.ndarray, *, seed: int | None) -> dict[str, Any]:
+    n, k = int(U.shape[0]), int(U.shape[1])
+    return {
+        "id": f"pop-{seed}",
+        "n_units": n,
+        "unit_dim": k,
+        "prior": "N(0, I)",
+        "note": "Row i is realized unit u_i in one population, not a new population.",
+        "representations": _json_float_grid(U),
+    }
 
 
-def pack_mechanism(
-    *,
-    U: np.ndarray,
+def _pack_response_law(
     W: np.ndarray,
     E: np.ndarray,
+    *,
     sigma: float,
     column_normalize: bool,
 ) -> dict[str, Any]:
-    """Serialize the DiscoSCM tuple <U, E, V, F> behind one observational episode."""
-    n, k = (int(U.shape[0]), int(U.shape[1]))
-    d = int(W.shape[0])
+    d, k = int(W.shape[0]), int(W.shape[1])
+    n = int(E.shape[0])
     return {
-        "framework": "DiscoSCM",
-        "version": "v0",
-        "observational": True,
-        "note": (
-            "Tuple <U, E, V, F>. U is unit selection (a realized population), "
-            "not SCM exogenous noise. E is factual noise; v0 does not redraw E(x)."
-        ),
-        "U": {
-            "role": "unit_selection",
-            "prior": "N(0, I)",
-            "shape": [n, k],
-            "values": _json_float_grid(U),
+        "form": "unit_specific_factor",
+        "assignment": MECHANISM_LAW,
+        "note": "Same law for every unit; unit-specificity enters through u_i.",
+        "W": {
+            "role": "shared_feature_directions",
+            "prior": "N(0, I) then optional column L2-normalize",
+            "column_normalize": bool(column_normalize),
+            "shape": [d, k],
+            "values": _json_float_grid(W),
         },
-        "E": {
-            "role": "factual_noise",
+        "noise": {
+            "kind": "factual",
             "prior": "N(0, sigma^2)",
             "sigma": float(sigma),
             "independent_of_U": True,
             "shape": [n, d],
             "values": _json_float_grid(E),
-        },
-        "V": ["Y"],
-        "F": {
-            "form": "unit_specific_factor",
-            "assignment": MECHANISM_LAW,
-            "column_normalize": bool(column_normalize),
-            "W": {
-                "role": "shared_feature_directions",
-                "prior": "N(0, I) then optional column L2-normalize",
-                "shape": [d, k],
-                "values": _json_float_grid(W),
-            },
         },
     }
 
@@ -105,88 +79,74 @@ def sample_episode(
     n_features: int = 8,
     unit_dim: int = DEFAULT_UNIT_DIM,
     query_frac: float = DEFAULT_QUERY_FRAC,
+    missing_frac: float = DEFAULT_MISSING_FRAC,
     sigma: float = DEFAULT_SIGMA,
     column_normalize: bool = True,
     debug: bool = False,
     return_mechanism: bool = False,
     seed: int | None = 0,
 ) -> dict[str, Any]:
-    """Draw one observational Unit×Feature episode.
-
-    Parameters
-    ----------
-    n_units, n_features, unit_dim
-        Grid size n×d and latent unit dim k.
-    query_frac
-        Fraction of all cells assigned to Q (the rest are C).
-    sigma
-        Observational noise std.
-    column_normalize
-        If True, L2-normalize columns of W.
-    debug
-        If True, attach Y_full and imply return_mechanism.
-    return_mechanism
-        If True, attach the DiscoSCM tuple behind this episode. Default omits it.
-    seed
-        Episode seed recorded in the payload (sampling uses `rng`).
-    """
     n = int(n_units)
     d = int(n_features)
     k = int(unit_dim)
+    n_cells = n * d
 
-    # Realized units of one population. Row i ↔ unit u_i, not a new population.
     U = rng.standard_normal((n, k))
     W = rng.standard_normal((d, k))
     if column_normalize:
         col_norm = np.linalg.norm(W, axis=0, keepdims=True)
         W = W / np.maximum(col_norm, 1e-8)
-
     E = rng.normal(0.0, float(sigma), size=(n, d))
-    # Y[i, j] = <U[i], W[j]> ; W[j] is row j of W.
     Y = U @ W.T + E
 
-    n_cells = n * d
-    n_query = int(round(float(query_frac) * n_cells))
-    n_query = max(1, min(n_query, n_cells - 1))
-    pick = rng.choice(n_cells, size=n_query, replace=False)
-    query_mask = np.zeros(n_cells, dtype=bool)
-    query_mask[pick] = True
-    query_mask = query_mask.reshape(n, d)
-    context_mask = ~query_mask
+    missing_frac = float(np.clip(missing_frac, 0.0, 0.9))
+    query_frac = float(np.clip(query_frac, 1e-6, 0.9))
+    n_miss = int(round(missing_frac * n_cells))
+    n_query = int(round(query_frac * n_cells))
+    # At least one context cell and one query cell; missing cannot eat the exam.
+    n_miss = max(0, min(n_miss, n_cells - 2))
+    n_query = max(1, min(n_query, n_cells - n_miss - 1))
 
-    y_input = Y.copy()
-    y_input[query_mask] = np.nan
-    # Flattened in C-order: y_query[t] is the t-th True of query_mask.ravel().
+    perm = rng.permutation(n_cells)
+    missing_flat = np.zeros(n_cells, dtype=bool)
+    query_flat = np.zeros(n_cells, dtype=bool)
+    missing_flat[perm[:n_miss]] = True
+    query_flat[perm[n_miss : n_miss + n_query]] = True
+    missing_mask = missing_flat.reshape(n, d)
+    query_mask = query_flat.reshape(n, d)
+    context_mask = ~(missing_mask | query_mask)
+
+    values = Y.copy()
+    values[query_mask | missing_mask] = np.nan
     y_query = Y[query_mask].astype(np.float64)
 
-    n_q = int(query_mask.sum())
-    n_c = int(context_mask.sum())
-    payload: dict[str, Any] = {
+    table: dict[str, Any] = {
+        "n_units": n,
+        "n_features": d,
+        "values": _json_float_grid(values),
+        "missing_mask": _json_bool_grid(missing_mask),
         "context_mask": _json_bool_grid(context_mask),
         "query_mask": _json_bool_grid(query_mask),
-        "y_input": _json_float_grid(y_input),
         "y_query": [float(v) for v in y_query],
         "shapes": {
-            "n_units": n,
-            "n_features": d,
-            "unit_dim": k,
-            "n_query": n_q,
-            "n_context": n_c,
-            "y_input": [n, d],
+            "values": [n, d],
+            "missing_mask": [n, d],
             "context_mask": [n, d],
             "query_mask": [n, d],
-            "y_query": [n_q],
+            "y_query": [int(query_mask.sum())],
+            "n_missing": int(missing_mask.sum()),
+            "n_context": int(context_mask.sum()),
+            "n_query": int(query_mask.sum()),
         },
-        "seed": seed,
     }
-    want_mechanism = bool(return_mechanism or debug)
-    if want_mechanism:
-        payload["mechanism"] = pack_mechanism(
-            U=U, W=W, E=E, sigma=sigma, column_normalize=column_normalize
+    payload: dict[str, Any] = {"seed": seed, "table": table}
+
+    if return_mechanism or debug:
+        payload["population"] = _pack_population(U, seed=seed)
+        payload["response_law"] = _pack_response_law(
+            W, E, sigma=sigma, column_normalize=column_normalize
         )
     if debug:
-        payload["U"] = _json_float_grid(U)
-        payload["W"] = _json_float_grid(W)
         payload["Y_full"] = _json_float_grid(Y)
     return payload
 
@@ -197,6 +157,7 @@ def sample_episodes(
     n_features: int = 8,
     unit_dim: int = DEFAULT_UNIT_DIM,
     query_frac: float = DEFAULT_QUERY_FRAC,
+    missing_frac: float = DEFAULT_MISSING_FRAC,
     sigma: float = DEFAULT_SIGMA,
     seed: int | None = 0,
     n_episodes: int = 1,
@@ -204,11 +165,6 @@ def sample_episodes(
     return_mechanism: bool = False,
     column_normalize: bool = True,
 ) -> list[dict[str, Any]]:
-    """Draw n_episodes independent observational grids.
-
-    If `seed` is an int, episode e uses seed+e. If `seed` is None, a random
-    base seed is drawn and still recorded per episode so the draw is named.
-    """
     n_episodes = max(1, min(int(n_episodes), 32))
     if seed is None:
         base = int(np.random.default_rng().integers(0, 2**31 - 1))
@@ -226,6 +182,7 @@ def sample_episodes(
                 n_features=n_features,
                 unit_dim=unit_dim,
                 query_frac=query_frac,
+                missing_frac=missing_frac,
                 sigma=sigma,
                 column_normalize=column_normalize,
                 debug=debug,
