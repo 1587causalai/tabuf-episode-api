@@ -21,6 +21,8 @@
 \tcbuselibrary{breakable,skins}
 \usepackage{fancyhdr}
 \usepackage{microtype}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
 
 \hypersetup{
   colorlinks=true,
@@ -145,7 +147,9 @@
 
 \paragraph{DiscoSCM。}
 行\textbf{就是} unit，每人有潜变量 $u_i$。
-先抽总体，再用 unit-specific 响应律填格子。
+先抽总体，再在特征 token $\mathbf{t}_j$ 上抽单位球 SCM
+（稀疏骨架 + 星枢纽 DAG、父混合后非线性 $\varphi$、异质噪声），
+再用 unit-specific 线性响应律 $g_j(\langle u_i,\mathbf{t}_j\rangle, e)$ 填格子（$K$ 类为线性 softmax）。
 这是 \Disco{} 自己的世界 \cite{gong2024discoscm}。公式在附录~\ref{app:disco}。
 
 \paragraph{文献 SCM / sklearn / OpenML。}
@@ -192,7 +196,7 @@ $M$ 与 $Q$ 可重合。训练路径禁止 $u_i$ 进网。
 \begin{itemize}
   \item 观测 episode；不干预、不重抽反事实噪声。
   \item 多通道，共享信封。
-  \item DiscoSCM：先总体，再 unit-specific 填格。
+  \item DiscoSCM：先总体，再特征 token 单位球 SCM（hub DAG、$\varphi$、异质噪声），再 unit-specific 填格。
   \item 其它通道按自己的世界生成，再进同一 Compiler。
   \item $R$ 与 $S$ 不许静默平均成一个头。现在只训 $R$。
 \end{itemize}
@@ -246,38 +250,111 @@ $u$ 钉住的是个体，不是行号。
 
 \subsection{Prior}
 
-第零版 Prior 很瘦。每个 unit
+总体是位置--尺度混合，不是单团 $\mathcal{N}(0,I_k)$。
+混合数
 \begin{equation}
-  \uu_i \sim \mathcal{N}(0, I_k),\qquad i=1,\ldots,n.
+  M \in \{1,\ldots,\lfloor\sqrt{n}\rfloor\},\qquad
+  P(M=m) \propto 1/m.
 \end{equation}
-$k$ 是请求里的 \texttt{unit\_dim}，个体嵌入的生成维数，不是网络宽度。
+等权时每类大约至少 $\sqrt{n}$ 个人。$P(M)\propto 1/m$ 让多数 episode 仍是 1--4 类，大表偶尔才顶到帽。
+权重 $\pi\sim\mathrm{Dirichlet}(1_M)$。每个分量独立抽族：Gaussian 或 Cauchy。
+$M=1$ 时中心在原点、尺度 $1$，高斯分量就是原来的 $\mathcal{N}(0,I_k)$，Cauchy 分量是标准 Cauchy。
+$M>1$ 时中心放在拉开的球面上，尺度对数正态，避免簇叠成一团。
+Cauchy 分量的中心是位置参数，不是均值。
+$k$ 是 \texttt{unit\_dim}，个体嵌入维数，不是网络宽度。默认 null，从先验抽样（众数约 $16$，支持 $[2,1024]$；这组混合是手工定的）。
 $\{\uu_i\}$ 合起来就是这一集自己的总体切片。每条 episode 各自抽一回。
 
+列数 \texttt{n\_features} 缺省时从先验抽样（众数约 $20$，支持 $[2,1000]$）：
+以 $0.80$ 从 $\log\mathcal{N}(\log 20, 0.50^2)$ 抽取并 clip 到 $[4,64]$，
+以 $0.15$ 从 $[20,200]$ 对数均匀抽取，以 $0.05$ 从 $[200,1000]$ 对数均匀抽取，
+最后 clip 到 $[2,1000]$。显式整数则直接用（同样 clip）。
+\texttt{unit\_dim} 缺省时从先验抽样（众数约 $16$，支持 $[2,1024]$）：
+以 $0.80$ 从 $\log\mathcal{N}(\log 16, 0.45^2)$ 抽取并 clip 到 $[2,64]$，
+以 $0.15$ 从 $[32,256]$ 对数均匀抽取，以 $0.05$ 从 $[256,1024]$ 对数均匀抽取。
+这组混合是手工定的。
 列类型按 \texttt{type\_weights} 多项抽样，默认权重
 $70{:}5{:}10{:}5{:}5$（numeric / ordinal / binary / categorical / high\_cardinality）。
-每列以 \texttt{independent\_frac}（默认 $0.05$）的概率与 $u$ 断开，改抽边缘。
+每列以 \texttt{independent\_frac}（默认 $0.05$）的概率\textbf{不进}特征 token DAG：
+无父节点，也不被当作父节点，并与 $u$ 断开，改抽原来的类型边缘。
 
-\subsection{World：按列类型填格}
+\subsection{World：特征 token 单位球 SCM，再按列类型填格}
 
 格子 $(i,j)$ 是第 $i$ 个 unit 在第 $j$ 个 feature 上的取值。
-列 $j$ 抽到类型后，用同一个 $\uu_i$ 贯穿这一行（独立列除外）。
+SCM 作用在特征 token $\mathbf{t}_j\in\mathbb{R}^k$ 上，\textbf{不是}作用在格子值 $Y$ 上。
+填格仍用原来的类型特异 $g_j$：把旧的 $\mathbf{w}_j$ 换成 $\mathbf{t}_j$，
+同一个 $\uu_i$ 贯穿这一行（独立列除外）。
 $\sigma$ 是观测噪声标准差，默认 $0.3$。
 
+\paragraph{DAG。}
+对非独立列：随机置换作为拓扑序。先抽稀疏骨架：典型父节点上限 $\texttt{typical\_cap}=6$
+（\texttt{max\_parents=null}），入度 $k\sim\mathrm{Poisson}(\lambda=2.2)$ 再 clip 到上限，
+从拓扑前驱按优先连接 $P(p)\propto \mathrm{outdeg}[p]+1$ 抽 $k$ 个父节点。
+这是\textbf{大概率}的常见图。另以概率 $0.15$（或请求 \texttt{graph\_family=star}）叠 $1$--$2$ 个显式星：
+抽 $\mathrm{frac}\sim\mathrm{Unif}[0.45,0.85]$，
+前三分之一一个 out-hub、后三分之一一个 in-hub，使极少数节点有很多父或很多子。
+\texttt{graph\_family=sparse} 强制不叠星。
+请求里显式给出 \texttt{max\_parents} 时，该整数是所有节点的硬上限，不叠星。
+\texttt{dag\_edge\_p} 是遗留字段：仍接受、仍写入 \texttt{response\_law}，
+但不再按 Bernoulli$(p)$ 连边。独立列不出现在这张 DAG 里。
+
+\paragraph{Token SCM。}
+$\beta$ 是父节点混合权重（L1 归一，$\sum|\beta|=1$）；效应强度是遗传力 $\alpha$（默认 $0.75$）。
+相对 $|\beta|$ 先按 NOTEARS/LiNGAM 惯例从 $\mathrm{Unif}[\beta_{\min},\beta_{\max}]$（默认 $[0.5,2]$）抽取、符号独立取 $\pm 1$，再 L1 归一；单父时 $\beta=\pm 1$。
+$\mathrm{Unif}[0.5,2]$ 只决定多父时的相对比例，normalize 之前。
+不要再用 $\mathcal{N}(0,0.4^2)$。
+按拓扑序在单位球上生成 $\mathbf{t}_j$。根节点（无父）
+$\mathbf{t}_j=\mathrm{normalize}(\eta_j)$，$\varphi_j=\mathrm{identity}$。
+有父时先线性混合再过非线性
+\begin{equation}
+  \mathbf{s}^{\mathrm{raw}}_j \;=\; \sum_{p\in\mathrm{pa}(j)}\beta_{jp}\,\mathbf{t}_p,\qquad
+  \mathbf{s}_j \;=\; \mathrm{normalize}\bigl(\varphi_j(\mathbf{s}^{\mathrm{raw}}_j)\bigr),
+\end{equation}
+$\varphi_j$ 以 $0.50/0.20/0.20/0.10$ 抽
+$\{\mathrm{identity},\tanh,\mathrm{leaky\_relu},\sin\}$
+（leaky ReLU 负半轴系数 $0.2$）。
+再抽与 $\mathbf{s}_j$ 正交的创新：先从该列噪声族抽 $\eta_{\mathrm{raw}}$，
+$\eta_j=\mathrm{normalize}\bigl(\eta_{\mathrm{raw}}-\langle\eta_{\mathrm{raw}},\mathbf{s}_j\rangle\mathbf{s}_j\bigr)$。
+遗传力 $\alpha=\texttt{token\_heritability}$ 截到 $(0.05,0.95)$，默认 $0.75$：
+\begin{equation}
+  \mathbf{t}_j \;=\; \mathrm{normalize}\bigl(\alpha\,\mathbf{s}_j + \sqrt{1-\alpha^2}\,\eta_j\bigr).
+\end{equation}
+因此 $\varphi=\mathrm{identity}$ 时 $\langle\mathbf{t}_j,\mathbf{s}_j\rangle\approx\alpha$；
+其它 $\varphi$ 会把子--父余弦从 $\alpha$ 上挪开一点。
+
+\paragraph{噪声族。}
+每列（含根节点与独立列）以 $0.50/0.30/0.20$ 抽
+$\{\mathrm{gaussian},\,t,\,\mathrm{Cauchy}\}$；$t$ 的自由度在 $\{3,4,5,6\}$ 上均匀。
+该族用于：根 token、正交创新 $\eta_{\mathrm{raw}}$、以及 numeric / binary / ordinal
+的观测噪声 $e_{ij}$（乘 $\sigma$，student-$t$ / Cauchy \textbf{不}再标准化到方差 $1$）。
+独立 numeric 为 $\mu + \sigma_j\cdot\mathrm{draw}$。
+类别列用线性 softmax（见下），观测噪声 $e$ 不进类别 logits。
+
 \paragraph{数值。}
-$Y_{ij}=\mathrm{scale}_j\,\langle \uu_i,\mathbf{w}_j\rangle+\mathrm{shift}_j+e_{ij}$，
-$\mathbf{w}_j$ 单位化。独立列则是列级高斯边缘。
+$Y_{ij}=\mathrm{scale}_j\,\langle \uu_i,\mathbf{t}_j\rangle+\mathrm{shift}_j+e_{ij}$。
+独立列则是列级高斯边缘。
 
 \paragraph{二值。}
-潜变量阈值：$\mathbf{1}\{\langle \uu_i,\mathbf{w}_j\rangle+e_{ij}>0\}$。
+潜变量阈值：$\mathbf{1}\{\langle \uu_i,\mathbf{t}_j\rangle+e_{ij}>0\}$。
 独立列是 Bernoulli。
 
 \paragraph{有序。}
-ordered probit：在 $\langle \uu_i,\mathbf{w}_j\rangle+e_{ij}$ 上切 $K_j-1$ 个阈值，
+ordered probit：在 $\langle \uu_i,\mathbf{t}_j\rangle+e_{ij}$ 上切 $K_j-1$ 个阈值，
 $K_j\in\{3,\ldots,8\}$。
 
 \paragraph{多值 / 超多值。}
-unit-specific multinomial logit，$Y_{ij}\sim\mathrm{softmax}(\uu_i C_j^\top)$ 加 Gumbel。
-超多值的类嵌入尺度更散。独立列是 Dirichlet-多项边缘。
+列 token 仍是 $\mathbf{t}_j$。类嵌入取
+\begin{equation}
+  C_c \;=\; a_c\mathbf{t}_j + 0.25\, r_c,\qquad r_c \perp \mathbf{t}_j,
+\end{equation}
+其中 $r_c$ 落在 $\mathbf{t}_j$ 的正交补上（因此共享方向钉在 $\mathbf{t}_j$；超多值时 $a_c$ 尺度更散）。
+响应在 $u$ 上是线性的：
+\begin{equation}
+  \mathrm{logits}_i \;=\; \uu_i C^\top,\qquad
+  p_i \;=\; \mathrm{softmax}(\mathrm{logits}_i),\qquad
+  Y_{ij}\sim\mathrm{Categorical}(p_i).
+\end{equation}
+$\varphi$ 只作用在 token SEM 的 $\mathbf{s}^{\mathrm{raw}}$ 上，不作用在 $Y$。
+独立列是 Dirichlet-多项边缘。
 
 离散格点是 $\{0,\ldots,K_j-1\}$ 的整数。数值格是 float。
 世界填满之后，掩码不许回头改 $Y_{ij}$。
@@ -286,13 +363,54 @@ unit-specific multinomial logit，$Y_{ij}\sim\mathrm{softmax}(\uu_i C_j^\top)$ �
 
 格子级。默认 $P(M)=0.05$、$P(Q)=0.15$，独立抽取，并集不必是 $20\%$。
 \texttt{query\_mode=cells}。\texttt{uses\_unit\_token=true}。
+\texttt{n\_units} 默认 $1000$（API 上限 $4096$）。
+\texttt{n\_features} 默认 \texttt{null}（从先验抽样，众数约 $20$，支持 $[2,1000]$）。
+\texttt{unit\_dim} 默认 \texttt{null}（从先验抽样，众数约 $16$，支持 $[2,1024]$）。
 
-需要看生成说明时，会带
+\texttt{return\_mechanism} 或 \texttt{debug} 时带
 \texttt{population}（含 \texttt{representations}）和
-\texttt{response\_law}（逐列 $g_j$ 的参数）。
+\texttt{response\_law}（DAG 的 \texttt{parents} / \texttt{betas}、
+\texttt{dag\_edge\_p}（遗留） / \texttt{max\_parents} /
+\texttt{typical\_max\_parents} / \texttt{max\_in\_degree} /
+\texttt{hubs} / \texttt{out\_hubs} / \texttt{in\_hubs} / \texttt{activations} / \texttt{noise\_families} /
+\texttt{n\_features\_sampled} / \texttt{token\_heritability} /
+\texttt{beta\_min} / \texttt{beta\_max}、
+特征 token $\mathbf{t}_j$、以及逐列 $g_j$ 的参数，含 \texttt{noise\_family}）。
+默认响应仍省略这些块。
 它们描述表从哪来，不是给网络的输入。形状见附录~\ref{app:payload}。
 
 \subsection{流水线}
+\label{fig:discoscm-pipe}
+
+空请求按图~\ref{fig:pipeline} 走。默认挂在对应步骤上。
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+  font=\small,
+  box/.style={draw=#1, fill=#1!8, rounded corners=2pt, align=left, inner sep=5pt, text width=12.4cm},
+  lab/.style={draw=#1, fill=#1, text=white, font=\bfseries\small, rounded corners=2pt, inner sep=4pt, minimum width=1.7cm, minimum height=0.72cm, align=center},
+  arr/.style={-{Latex}, gray!60, thick}
+]
+\node[lab=blue!60!black] (a1) at (0,0) {1 尺寸};
+\node[box=blue!60!black, anchor=west] (b1) at (2.0,0) {$n{=}1000$；$d$ 未指定则抽样（80\% 众数约 20，15\% 到 200，5\% 到 $200$–$1000$）。};
+\node[lab=blue!60!black] (a2) at (0,-1.15) {2 Prior};
+\node[box=blue!60!black, anchor=west] (b2) at (2.0,-1.15) {$u_i\sim\mathcal{N}(0,I_k)$，$k$ 未指定则抽样（众数约 16，支持 $[2,1024]$）。};
+\node[lab=blue!60!black] (a3) at (0,-2.30) {3 列类型};
+\node[box=blue!60!black, anchor=west] (b3) at (2.0,-2.30) {权重 $70{:}5{:}10{:}5{:}5$。独立列概率 $0.05$，不进 DAG。};
+\node[lab=orange!80!black] (a4) at (0,-3.45) {4 DAG};
+\node[box=orange!80!black, anchor=west] (b4) at (2.0,-3.45) {大概率稀疏骨架 $\lambda{=}2.2$、最多 6 父；约 $15\%$ 抽星形枢纽（极少数节点很多父/子）。};
+\node[lab=orange!80!black] (a5) at (0,-4.60) {5 SEM};
+\node[box=orange!80!black, anchor=west] (b5) at (2.0,-4.60) {$\beta$ 混合 $\sum|\beta|{=}1$；$\varphi\in\{\mathrm{id},\tanh,\mathrm{lReLU},\sin\}$；$\alpha{=}0.75$，$t=\alpha s+\sqrt{1-\alpha^2}\eta$。};
+\node[lab=blue!60!black] (a6) at (0,-5.75) {6 填格};
+\node[box=blue!60!black, anchor=west] (b6) at (2.0,-5.75) {$Y_{ij}=g_j(\langle u_i,t_j\rangle,e_{ij})$。$K$ 类：线性 softmax。$e$ 为高斯 $50\%$ / $t$ $30\%$ / Cauchy $20\%$，$\sigma{=}0.3$。};
+\node[lab=blue!60!black] (a7) at (0,-6.90) {7 信封};
+\node[box=blue!60!black, anchor=west] (b7) at (2.0,-6.90) {$P(M){=}0.05$，$P(Q){=}0.15$。线上只有 values / missing / query。};
+\foreach \a/\b in {a1/a2,a2/a3,a3/a4,a4/a5,a5/a6,a6/a7} \draw[arr] (\a) -- (\b);
+\end{tikzpicture}
+\caption{DiscoSCM 观测 episode 生成流水线。因果在特征 token 上，不在格子值上。}
+\label{fig:pipeline}
+\end{figure}
 
 Prior $\to$ World $\to$ Compiler。网络不进生成器。
 真目标表上从第一天就冻 $\theta$，合成引擎只负责预训练 episode。
@@ -392,12 +510,19 @@ recsys & user & observed\_cells & 未观测 & 已观测的 $0.15$ \\
 
 线上字段名以 \texttt{docs/api.pdf} 为准。这里只讲含义：这些块描述表从哪来，不是网络输入。
 
-discoscm 在需要看生成说明时给两块：
+discoscm 在 \texttt{return\_mechanism} 或 \texttt{debug} 时给两块：
 \texttt{population} 含 \texttt{id}、\texttt{n\_units}、\texttt{unit\_dim}、
 \texttt{prior}、\texttt{representations}（行 $i$ 是 $u_i$）；
-\texttt{response\_law} 含 \texttt{form}、\texttt{type\_weights}、
-\texttt{column\_independent\_prob}、逐列 \texttt{columns}。
-没有 \texttt{mechanism} 字段。
+\texttt{response\_law} 含 \texttt{form}（\texttt{feature\_token\_linear\_scm}）、
+\texttt{type\_weights}、\texttt{column\_independent\_prob}、
+\texttt{dag\_edge\_p}（遗留）、\texttt{max\_parents}、
+\texttt{typical\_max\_parents}、\texttt{max\_in\_degree}、
+\texttt{token\_heritability}、
+\texttt{beta\_min}、\texttt{beta\_max}、\texttt{n\_features\_sampled}、
+\texttt{parents}、\texttt{betas}、\texttt{tokens}（独立列为 null）、
+\texttt{activations}、\texttt{noise\_families}、\texttt{hubs} / \texttt{out\_hubs} / \texttt{in\_hubs}、
+以及逐列 \texttt{columns}（含 \texttt{noise\_family} / \texttt{noise\_df}）。
+默认响应省略这些块。没有 \texttt{mechanism} 字段。
 
 scm 给 \texttt{mechanism}：\texttt{framework=ANM-SCM}、\texttt{edges}、
 \texttt{node\_fn}、\texttt{target\_col}。没有 population / response\_law。
