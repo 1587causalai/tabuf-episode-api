@@ -631,3 +631,11 @@ def test_n_episodes_packs_into_shape_batches():
     k1 = {ep["table"]["unit_dim"] for ep in eps[8:]}
     assert len(d0) == 1 and len(d1) == 1 and len(k0) == 1 and len(k1) == 1
     assert {ep["seed"] for ep in eps} == set(range(16))
+
+
+def test_default_batch_size_is_one():
+    from generator import group_batches
+    eps = sample_episodes(n_units=12, n_features=None, unit_dim=None, seed=0, n_episodes=4)
+    assert len(eps) == 4
+    batches = group_batches(eps, 1)
+    assert len(batches) == 4

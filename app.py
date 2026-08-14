@@ -12,7 +12,7 @@ from generator import group_batches, sample_episodes
 VERSION = "v0"
 
 DESCRIPTION = """
-一次返回 n_episodes 条不同的 episode（默认 8），按 batch_size（默认 8）打包成同形状的 batch；下一组会重抽 d、k。source 默认 discoscm。
+一次返回 n_episodes 条不同的 episode（默认 8），按 batch_size（默认 1）打包；设成 8 则组内同形状；下一组会重抽 d、k。source 默认 discoscm。
 
 各来源语义不同：只有 discoscm 把行当成带潜变量的 unit。
 其它来源（scm / sklearn_* / openml / recsys）各有自己的行含义。
@@ -56,7 +56,7 @@ class EpisodeRequest(BaseModel):
     query_column: int | None = Field(default=None, ge=0, description="query_mode=label_column 时整列 query 的列下标；缺省最后一列")
     sigma: float = Field(default=0.3, ge=0.0, le=10.0)
     seed: int | None = Field(default=0)
-    batch_size: int = Field(default=8, ge=1, le=32, examples=[8], description="一个训练 batch 的条数；组内共用 n/d/k，下一组重抽 d、k")
+    batch_size: int = Field(default=1, ge=1, le=32, examples=[1], description="一组同形状的条数，默认 1（每条自己抽 d、k）；设 8 则可堆 tensor")
     n_episodes: int = Field(default=8, ge=1, le=32, examples=[8], description="不同生成世界的条数；可以大于 batch_size")
     type_weights: TypeWeights = Field(default_factory=TypeWeights, description="discoscm-only：列类型抽样权重，不必归一化")
     independent_frac: float = Field(default=0.05, ge=0.0, le=1.0, description="discoscm-only：每列与其它特征独立的概率")

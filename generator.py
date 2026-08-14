@@ -937,12 +937,12 @@ def sample_episodes(
     """Draw distinct episodes, packed into same-shape batches.
 
     ``n_episodes`` is how many different worlds to draw (default 8).
-    ``batch_size`` is the GPU pack (default 8): within a batch, n/d/k are
+    ``batch_size`` is the GPU pack (default 1): within a batch, n/d/k are
     shared; the next batch re-samples d and k (if they were left null).
     Episode content uses seed, seed+1, ... independently of the shape stream.
     """
     n_ep = 8 if n_episodes is None else int(n_episodes)
-    bs = 8 if batch_size is None else int(batch_size)
+    bs = 1 if batch_size is None else int(batch_size)
     n_ep = max(1, min(n_ep, 32))
     bs = max(1, min(bs, 32))
     if seed is None:
